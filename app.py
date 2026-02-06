@@ -1,31 +1,26 @@
 import streamlit as st
 
-# --- CONFIGURATION & SESSION STATE ---
+# --- CONFIGURATION ---
 st.set_page_config(
-    page_title="2026 Tax Refund Estimator",
-    page_icon="💰",
+    page_title="2026 Tax Estimator",
+    page_icon="⚖️",
     layout="wide"
 )
 
-# Initialize session state for all inputs if not present
-if 'wages' not in st.session_state:
-    st.session_state.update({
-        'wages': 0.0, 'w2_withheld': 0.0, 'int_income': 0.0, 
-        'ord_div': 0.0, 'qual_div': 0.0, 'b_proceeds': 0.0, 
-        'b_basis': 0.0, 'c_proceeds': 0.0, 'c_basis': 0.0
-    })
-
-def clear_all_data():
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
-
 # --- 2025 TAX DATA (For filing in 2026) ---
-# Updated with 2025 Standard Deductions
 TAX_DATA = {
-    "Single": {"std_deduct": 15750, "brackets": [(11925, 0.10), (48475, 0.12), (103350, 0.22), (197300, 0.24)]},
-    "Married Filing Jointly": {"std_deduct": 31500, "brackets": [(23850, 0.10), (96950, 0.12), (206700, 0.22), (394600, 0.24)]},
-    "Head of Household": {"std_deduct": 23650, "brackets": [(17000, 0.10), (64850, 0.12), (103350, 0.22), (197300, 0.24)]}
+    "Single": {
+        "std_deduct": 15750,
+        "brackets": [(11925, 0.10), (48475, 0.12), (103350, 0.22), (197300, 0.24), (250525, 0.32), (626350, 0.35), (float('inf'), 0.37)]
+    },
+    "Married Filing Jointly": {
+        "std_deduct": 31500,
+        "brackets": [(23850, 0.10), (96950, 0.12), (206700, 0.22), (394600, 0.24), (501050, 0.32), (751600, 0.35), (float('inf'), 0.37)]
+    },
+    "Head of Household": {
+        "std_deduct": 23625,
+        "brackets": [(17000, 0.10), (64850, 0.12), (103350, 0.22), (197300, 0.24), (250525, 0.32), (626350, 0.35), (float('inf'), 0.37)]
+    }
 }
 
 def calculate_tax(taxable_income, status):
@@ -41,97 +36,122 @@ def calculate_tax(taxable_income, status):
             break
     return tax
 
-# --- UI: HEADER & DISCLAIMER ---
-st.title("🧮 2026 Federal Tax Estimator")
-st.caption("Tax Year: 2025 | Filing Season: Jan-April 2026")
+def clear_all_data():
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
 
-with st.expander("⚠️ LEGAL DISCLAIMER & PRIVACY NOTE", expanded=True):
-    st.warning("""
-    **Not a Tax Filing Service:** This app provides **estimates only**. It is not a substitute for professional 
-    advice from a CPA or licensed tax preparer. Tax laws (especially for Crypto/1099-DA) are subject to change.
-    
-    **Privacy:** We do not store your data. All information stays in your browser's temporary memory. 
-    Closing the tab or clicking 'Clear All Data' wipes everything.
-    """)
+# --- UI: HEADER ---
+st.title("🧮 2026 Federal Tax Refund Estimator")
+st.caption("Updated for 2025 Tax Year (Filing in 2026)")
 
-# --- SIDEBAR Controls ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("⚙️ Global Settings")
     status = st.selectbox("Filing Status", list(TAX_DATA.keys()))
-    dependents = st.number_input("Children (Under 17)", 0, 10, step=1)
+    dependents = st.number_input("Qualifying Children (Under 17)", 0, 15, step=1)
     st.divider()
     if st.button("🗑️ Clear All Personal Data"):
         clear_all_data()
-    st.divider()
-    st.info("Tracking JEPI? Use the 'Dividends' tab to enter your 1099-DIV totals.")
 
-# --- MAIN INPUT TABS ---
-tab1, tab2, tab3 = st.tabs(["💼 Employment (W-2)", "📈 Investments (1099s)", "🪙 Crypto (1099-DA)"])
+# --- TABS FOR INPUT ---
+tab_w2, tab_inv, tab_crypto, tab_deduct = st.tabs([
+    "💼 W-2 Income", "📊 1099 Investments", "🪙 1099-DA Crypto", "🏠 Deductions"
+])
 
-with tab1:
-    st.subheader("Wage Income")
-    col1, col2 = st.columns(2)
-    with col1:
-        wages = st.number_input("W-2 Box 1: Total Wages", min_value=0.0, step=500.0, key="wages")
-        st.caption("💡 Found on the paper from your employer.")
-    with col2:
-        w2_withheld = st.number_input("W-2 Box 2: Fed Tax Withheld", min_value=0.0, step=100.0, key="w2_withheld")
-
-with tab2:
-    st.subheader("Standard Investment Forms")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("**1099-INT (Interest)**")
-        int_inc = st.number_input("Box 1: Interest Income", min_value=0.0, key="int_income")
-        
-        st.markdown("**1099-DIV (Dividends)**")
-        ord_div = st.number_input("Box 1a: Total Ordinary Dividends", min_value=0.0, key="ord_div")
-        st.caption("Include JEPI dividends here.")
+# 1. W-2 Tab (DYNAMIC FOR SPOUSES)
+with tab_w2:
+    st.subheader("W-2 Wage Statements")
     
-    with col_b:
-        st.markdown("**1099-B (Stock Sales)**")
-        b_proc = st.number_input("Box 1d: Sales Proceeds", min_value=0.0, key="b_proceeds")
-        b_basis = st.number_input("Box 1e: Cost Basis", min_value=0.0, key="b_basis")
-        stock_gain = max(0.0, b_proc - b_basis)
-        st.write(f"Estimated Stock Gain: **${stock_gain:,.2f}**")
+    if status == "Married Filing Jointly":
+        st.info("Input both W-2s separately below. We will total them for you.")
+        col_tp, col_sp = st.columns(2)
+        
+        with col_tp:
+            st.markdown("**Taxpayer (Partner 1)**")
+            tp_wages = st.number_input("Box 1: Wages", min_value=0.0, step=1000.0, key="tp_wages")
+            tp_withheld = st.number_input("Box 2: Fed Withheld", min_value=0.0, step=100.0, key="tp_wh")
+            
+        with col_sp:
+            st.markdown("**Spouse (Partner 2)**")
+            sp_wages = st.number_input("Box 1: Wages ", min_value=0.0, step=1000.0, key="sp_wages")
+            sp_withheld = st.number_input("Box 2: Fed Withheld ", min_value=0.0, step=100.0, key="sp_wh")
+            
+        total_w2_wages = tp_wages + sp_wages
+        total_w2_withheld = tp_withheld + sp_withheld
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            total_w2_wages = st.number_input("Box 1: Wages & Tips", min_value=0.0, step=1000.0, key="s_wages")
+        with col2:
+            total_w2_withheld = st.number_input("Box 2: Federal Withheld", min_value=0.0, step=100.0, key="s_wh")
 
-with tab3:
+# 2. Investments Tab (For your JEPI holdings)
+with tab_inv:
+    st.subheader("Standard Brokerage Income")
+    c_int, c_div, c_stk = st.columns(3)
+    with c_int:
+        st.markdown("**1099-INT**")
+        int_inc = st.number_input("Interest Income", min_value=0.0, key="int_inc")
+    with c_div:
+        st.markdown("**1099-DIV**")
+        ord_div = st.number_input("Ordinary Dividends", min_value=0.0, key="ord_div", help="Enter JEPI dividends here.")
+    with c_stk:
+        st.markdown("**1099-B (Stocks)**")
+        b_proc = st.number_input("Sales Proceeds", min_value=0.0, key="b_proc")
+        b_basis = st.number_input("Cost Basis", min_value=0.0, key="b_basis")
+    stock_gain = max(0.0, b_proc - b_basis)
+
+# 3. Crypto Tab
+with tab_crypto:
     st.subheader("Digital Assets (New Form 1099-DA)")
-    st.info("New for 2026 filing: Crypto exchanges now issue 1099-DA.")
-    c_proc = st.number_input("Gross Crypto Proceeds", min_value=0.0, key="c_proceeds")
-    c_basis = st.number_input("Calculated Crypto Basis", min_value=0.0, key="c_basis")
+    c_proc = st.number_input("Crypto Proceeds", min_value=0.0, key="c_proc")
+    c_basis = st.number_input("Crypto Cost Basis", min_value=0.0, key="c_basis")
     crypto_gain = max(0.0, c_proc - c_basis)
 
-# --- CALCULATION LOGIC ---
-total_income = wages + int_inc + ord_div + stock_gain + crypto_gain
-std_deduction = TAX_DATA[status]["std_deduct"]
-taxable_income = max(0.0, total_income - std_deduction)
+# 4. Deductions Tab
+with tab_deduct:
+    st.subheader("Itemized Deductions (Schedule A)")
+    agi_estimate = total_w2_wages + int_inc + ord_div + stock_gain + crypto_gain
+    
+    cd1, cd2 = st.columns(2)
+    with cd1:
+        med_total = st.number_input("Medical/Dental Expenses", min_value=0.0)
+        salt_tax = st.number_input("State/Local Taxes (SALT)", min_value=0.0, max_value=40000.0, help="2025 cap is $40k")
+    with cd2:
+        mortgage_int = st.number_input("Mortgage Interest", min_value=0.0)
+        charity = st.number_input("Charitable Gifts", min_value=0.0)
+    
+    med_deduction = max(0.0, med_total - (agi_estimate * 0.075))
+    total_itemized = med_deduction + salt_tax + mortgage_int + charity
 
-# Calculation
-est_tax_bill = calculate_tax(taxable_income, status)
-child_credit = dependents * 2200  # 2025 Rate
-final_tax_owed = max(0.0, est_tax_bill - child_credit)
-refund_amount = w2_withheld - final_tax_owed
+# --- FINAL CALCULATIONS ---
+standard_deduct = TAX_DATA[status]["std_deduct"]
+final_deduction = max(standard_deduct, total_itemized)
+taxable_income = max(0.0, agi_estimate - final_deduction)
+
+raw_tax = calculate_tax(taxable_income, status)
+child_credit = dependents * 2200
+tax_liability = max(0.0, raw_tax - child_credit)
+refund_owe = total_w2_withheld - tax_liability
 
 # --- RESULTS DISPLAY ---
 st.divider()
-st.header("📊 Your Estimation Summary")
+st.header("📋 Summary Estimate")
+res1, res2, res3 = st.columns(3)
+res1.metric("Total Wages", f"${total_w2_wages:,.2f}")
+res2.metric("Final Deduction", f"${final_deduction:,.2f}")
+res3.metric("Tax Liability", f"${tax_liability:,.2f}")
 
-c1, c2, c3 = st.columns(3)
-c1.metric("Total Income", f"${total_income:,.2f}")
-c2.metric("Taxable Income", f"${taxable_income:,.2f}")
-c3.metric("Standard Deduction", f"${std_deduction:,.2f}")
-
-if refund_amount >= 0:
-    st.success(f"### Estimated Refund: **${refund_amount:,.2f}**")
-    st.balloons()
+if refund_owe >= 0:
+    st.success(f"### Estimated Refund: **${refund_owe:,.2f}**")
 else:
-    st.error(f"### Estimated Additional Tax Owed: **${abs(refund_amount):,.2f}**")
+    st.error(f"### Estimated Tax Owed: **${abs(refund_owe):,.2f}**")
 
-st.markdown("---")
-st.subheader("📝 Next Steps for your CPA")
-st.write(f"""
-1. **Download your 1099s:** Especially your 1099-DIV for your **JEPI** holdings.
-2. **Bring this summary:** Tell your CPA your estimated taxable income is **${taxable_income:,.2f}**.
-3. **Review Crypto:** Ensure your **1099-DA** basis matches your personal records.
-""")
+with st.expander("📝 Details for CPA"):
+    st.write(f"**Status:** {status}")
+    st.write(f"**Gross Income:** ${agi_estimate:,.2f}")
+    st.write(f"**Total Withheld:** ${total_w2_withheld:,.2f}")
+    if total_itemized > standard_deduct:
+        st.write("👉 Recommend Itemizing (expenses exceed standard deduction).")
+    st.info("Since you own 10 shares of JEPI, ensure your CPA reviews your 1099-DIV for 'Qualified' vs 'Ordinary' dividends.")
