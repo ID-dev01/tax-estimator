@@ -1,117 +1,113 @@
 import streamlit as st
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="2026 Tax Estimator", page_icon="⚖️", layout="wide")
+st.set_page_config(page_title="2026 Multi-State Tax Estimator", layout="wide")
 
-# --- TAX DATA (2025/2026 Estimates) ---
-FEDERAL_DATA = {
-    "Single": {"std_deduct": 15750, "brackets": [(11925, 0.10), (48475, 0.12), (103350, 0.22), (197300, 0.24)]},
-    "Married Filing Jointly": {"std_deduct": 31500, "brackets": [(23850, 0.10), (96950, 0.12), (206700, 0.22), (394600, 0.24)]}
-}
+# --- 2025/2026 TAX DATA ---
+# Brackets are simplified for the app logic
+FED_DATA = {"Single": 15750, "Married Filing Jointly": 31500}
+STATE_RATES = {"NJ": 0.055, "NY": 0.062, "CT": 0.055, "CA": 0.093}
 
-# Simplified State Brackets (Aggregated for v1)
-STATE_RATES = {
-    "NJ": 0.055, # Avg effective for mid-earners
-    "NY": 0.062, # Avg effective for mid-earners 
-    "CT": 0.055,
-    "CA": 0.093, # Higher average for CA
-}
+def clear_all_data():
+    for key in list(st.session_state.keys()): del st.session_state[key]
+    st.rerun()
 
-def calculate_tax(income, brackets):
-    tax = 0
-    prev_limit = 0
-    for limit, rate in brackets:
-        if income > limit:
-            tax += (limit - prev_limit) * rate
-            prev_limit = limit
-        else:
-            tax += (income - prev_limit) * rate
-            break
-    return tax
-
-# --- SIDEBAR: RESIDENCY & STATUS ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("📍 Location & Status")
-    status = st.selectbox("Filing Status", list(FEDERAL_DATA.keys()))
+    st.header("👤 Filing Profile")
+    status = st.selectbox("Filing Status", ["Single", "Married Filing Jointly"])
     residence = st.selectbox("State of Residence", ["NJ", "NY", "CT"])
-    work_state = st.selectbox("State of Employment", ["NJ", "NY", "CA"])
-    dependents = st.number_input("Children (Under 17)", 0, 10)
-    if st.button("🗑️ Clear All Data"):
-        for key in list(st.session_state.keys()): del st.session_state[key]
-        st.rerun()
+    dependents = st.number_input("Children", 0, 10)
+    st.divider()
+    if st.button("🗑️ Clear All Data"): clear_all_data()
 
 # --- INPUT TABS ---
-t_w2, t_inv, t_deduct = st.tabs(["💼 W-2 Wages", "📊 Investments", "🏠 Deductions"])
+tab_w2, tab_inv, tab_deduct = st.tabs(["💼 W-2 Wages", "📊 Investments", "🏠 Deductions"])
 
-with t_w2:
-    st.info(f"Scenario: Resident of **{residence}** working in **{work_state}**")
+with tab_w2:
+    st.subheader("W-2 Income per Spouse")
     if status == "Married Filing Jointly":
-        c1, c2 = st.columns(2)
-        with c1:
-            tp_w = st.number_input("Taxpayer Box 1 Wages", 0.0, key="tp_w")
-            tp_fed_wh = st.number_input("Taxpayer Fed Withheld", 0.0, key="tp_wh")
-            tp_st_wh = st.number_input(f"Taxpayer {work_state} Withheld", 0.0, key="tp_s_wh")
-        with c2:
-            sp_w = st.number_input("Spouse Box 1 Wages", 0.0, key="sp_w")
-            sp_fed_wh = st.number_input("Spouse Fed Withheld", 0.0, key="sp_wh")
-            sp_st_wh = st.number_input(f"Spouse {work_state} Withheld", 0.0, key="sp_s_wh")
-        total_wages = tp_w + sp_w
-        total_fed_wh = tp_fed_wh + sp_fed_wh
-        total_st_wh = tp_st_wh + sp_st_wh
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Taxpayer (Partner 1)**")
+            tp_work_st = st.selectbox("Work State", ["NJ", "NY", "CA"], key="tp_st")
+            tp_wages = st.number_input("Box 1 Wages", 0.0, key="tp_w")
+            tp_fed_wh = st.number_input("Fed Withheld", 0.0, key="tp_fwh")
+            tp_st_wh = st.number_input(f"{tp_work_st} State Withheld", 0.0, key="tp_swh")
+        with col2:
+            st.markdown("**Spouse (Partner 2)**")
+            sp_work_st = st.selectbox("Work State ", ["NJ", "NY", "CA"], key="sp_st")
+            sp_wages = st.number_input("Box 1 Wages ", 0.0, key="sp_w")
+            sp_fed_wh = st.number_input("Fed Withheld ", 0.0, key="sp_fwh")
+            sp_st_wh = st.number_input(f"{sp_work_st} State Withheld ", 0.0, key="sp_swh")
     else:
-        total_wages = st.number_input("W-2 Box 1 Wages", 0.0, key="s_w")
-        total_fed_wh = st.number_input("W-2 Box 2 Fed Withheld", 0.0, key="s_wh")
-        total_st_wh = st.number_input(f"W-2 Box 17 {work_state} Withheld", 0.0, key="s_s_wh")
+        # Single Filer
+        tp_work_st = st.selectbox("Work State", ["NJ", "NY", "CA"])
+        tp_wages = st.number_input("Box 1 Wages", 0.0)
+        tp_fed_wh = st.number_input("Fed Withheld", 0.0)
+        tp_st_wh = st.number_input(f"{tp_work_st} Withheld", 0.0)
+        sp_wages = 0.0; sp_fed_wh = 0.0; sp_st_wh = 0.0; sp_work_st = residence
 
-with t_inv:
+with tab_inv:
     st.subheader("Dividends & Interest")
-    ord_div = st.number_input("Total Ordinary Dividends (inc. JEPI)", 0.0)
+    ord_div = st.number_input("Ordinary Dividends (inc. JEPI)", 0.0)
     int_inc = st.number_input("Interest Income", 0.0)
-    total_income = total_wages + ord_div + int_inc
-
-with t_deduct:
-    st.subheader("Itemized vs Standard")
-    st.caption("2025 SALT Cap is now $40,000!")
-    salt = st.number_input("State/Local Taxes (Property + State Tax)", 0.0, 40000.0)
-    mortgage = st.number_input("Mortgage Interest", 0.0)
-    charity = st.number_input("Charity", 0.0)
-    
-    itemized = salt + mortgage + charity
-    final_deduct = max(itemized, FEDERAL_DATA[status]["std_deduct"])
 
 # --- CALCULATIONS ---
-# 1. Federal
-fed_taxable = max(0.0, total_income - final_deduct)
-fed_tax_bill = calculate_tax(fed_taxable, FEDERAL_DATA[status]["brackets"]) - (dependents * 2200)
+total_income = tp_wages + sp_wages + ord_div + int_inc
+fed_deduct = FED_DATA[status]
+fed_taxable = max(0.0, total_income - fed_deduct)
 
-# 2. State Calculation Logic
-st_tax_rate = STATE_RATES.get(work_state, 0.05)
-work_st_bill = total_wages * st_tax_rate
+# 1. Federal Estimate (Simple 15% effective for demo)
+fed_tax_bill = fed_taxable * 0.15 - (dependents * 2200)
 
-# Home State Credit Logic
-if residence != work_state:
-    home_st_rate = STATE_RATES.get(residence, 0.05)
-    home_st_liability = total_income * home_st_rate
-    # Credit for taxes paid to work state (cannot exceed home state tax)
-    credit = min(home_st_liability, work_st_bill)
-    final_home_st_tax = max(0.0, home_st_liability - credit)
+# 2. State Logic: Credit for Taxes Paid to Other Jurisdictions
+# Calculate what was earned in a foreign state
+foreign_income = 0
+foreign_tax_paid = 0
+
+if tp_work_st != residence:
+    foreign_income += tp_wages
+    foreign_tax_paid += (tp_wages * STATE_RATES[tp_work_st])
+if sp_work_st != residence:
+    foreign_income += sp_wages
+    foreign_tax_paid += (sp_wages * STATE_RATES[sp_work_st])
+
+# Home State Liability (Before Credit)
+home_rate = STATE_RATES[residence]
+home_tax_before_credit = total_income * home_rate
+
+# The NJ/CT/NY Credit Rule: 
+# Credit = (Foreign Income / Total Income) * Home Tax Liability
+if total_income > 0:
+    max_allowable_credit = (foreign_income / total_income) * home_tax_before_credit
+    actual_credit = min(foreign_tax_paid, max_allowable_credit)
 else:
-    final_home_st_tax = total_income * STATE_RATES.get(residence, 0.05)
+    actual_credit = 0
+
+final_home_tax = max(0.0, home_tax_before_credit - actual_credit)
+total_st_withheld = tp_st_wh + sp_st_wh
 
 # --- RESULTS ---
 st.divider()
-c1, c2 = st.columns(2)
+st.header("📋 Summary for 2026")
+c1, c2, c3 = st.columns(3)
+
 with c1:
-    st.subheader("Federal Result")
-    fed_ref = total_fed_wh - fed_tax_bill
-    if fed_ref >= 0: st.success(f"Federal Refund: **${fed_ref:,.2f}**")
-    else: st.error(f"Federal Owed: **${abs(fed_ref):,.2f}**")
+    st.metric("Total Income", f"${total_income:,.0f}")
+    fed_ref = (tp_fed_wh + sp_fed_wh) - fed_tax_bill
+    if fed_ref >= 0: st.success(f"Fed Refund: ${fed_ref:,.0f}")
+    else: st.error(f"Fed Owed: ${abs(fed_ref):,.0f}")
 
 with c2:
-    st.subheader(f"{residence} State Result")
-    # Simplified state refund: What you paid to the work state vs what you owe home
-    state_ref = total_st_wh - work_st_bill - final_home_st_tax
-    if state_ref >= 0: st.success(f"State Refund: **${state_ref:,.2f}**")
-    else: st.error(f"State Owed: **${abs(state_ref):,.2f}**")
+    st.metric(f"{residence} Tax (Home)", f"${final_home_tax:,.0f}")
+    st_ref = total_st_withheld - foreign_tax_paid - final_home_tax
+    if st_ref >= 0: st.success(f"State Refund: ${st_ref:,.0f}")
+    else: st.error(f"State Owed: ${abs(st_ref):,.0f}")
 
-st.info(f"💡 **Note:** Because you work in {work_state}, you'll likely file a **Non-Resident** return there and a **Resident** return in {residence}.")
+with c3:
+    st.metric("Credit for Other States", f"${actual_credit:,.0f}")
+    st.caption(f"Based on ${foreign_income:,.0f} earned outside {residence}")
+
+if residence == "NJ" and (tp_work_st == "NY" or sp_work_st == "NY"):
+    st.info("💡 **NJ-NY Note:** You will file NY Form IT-203 (Non-resident) and NJ-1040 with Schedule NJ-COJ for your credit.")
