@@ -3,18 +3,18 @@ import plotly.express as px
 import pandas as pd
 
 # --- 2026 CONFIGURATION ---
-st.set_page_config(page_title="2026 Universal Tax Optimizer", layout="wide")
+st.set_page_config(page_title="2026 Universal Fed & NJ Tax Optimizer", layout="wide")
 
 FED_DATA = {
     "Single": {
-        "std_deduct": 16100, "sr_boost": 2050, "obbb_sr": 6000,
+        "std_deduct": 16100, "sr_boost": 2050, 
         "brackets": [(12400, 0.10), (50400, 0.12), (105700, 0.22), (201775, 0.24)],
-        "salt_base_cap": 20200, "salt_phaseout": 252500, "hsa_max": 4400
+        "salt_base_cap": 20200, "hsa_max": 4400
     },
     "Married Filing Jointly": {
-        "std_deduct": 32200, "sr_boost": 1650, "obbb_sr": 6000,
+        "std_deduct": 32200, "sr_boost": 1650, 
         "brackets": [(24800, 0.10), (100800, 0.12), (211400, 0.22), (403550, 0.24)],
-        "salt_base_cap": 40400, "salt_phaseout": 505000, "hsa_max": 8750
+        "salt_base_cap": 40400, "hsa_max": 8750
     }
 }
 
@@ -34,99 +34,94 @@ def calc_tax(income, brackets):
 with st.sidebar:
     st.header("👤 User Profile")
     status = st.selectbox("Filing Status", ["Married Filing Jointly", "Single"])
-    
-    # Generic age triggers
     u_age = st.number_input("Your Age", 18, 100, 35)
-    s_age = 0
-    if status == "Married Filing Jointly":
-        s_age = st.number_input("Spouse Age", 18, 100, 35)
-    
-    is_homeowner = st.toggle("Homeowner in NJ?", value=True)
+    s_age = st.number_input("Spouse Age", 18, 100, 35) if status == "Married Filing Jointly" else 0
+    is_homeowner = st.toggle("NJ Homeowner?", value=True)
     mode = st.radio("Optimization Mode", ["Manual (Binary)", "Auto-Optimize (Max)"])
 
-t1, t2, t3 = st.tabs(["💰 Income", "📑 Deductions & Credits", "📊 Results"])
+t1, t2, t3 = st.tabs(["💰 Income Details", "📑 NJ Deductions", "📊 Results & Charts"])
 
 with t1:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("### **Taxpayer**")
-        tp_w2 = st.number_input("W-2 Fed Wages", 0.0, key="tp_w2_input")
-        tp_fwh = st.number_input("Federal Withholding", 0.0, key="tp_fed_wh_input")
-        tp_swh = st.number_input("NJ State Withholding", 0.0, key="tp_nj_wh_input")
+        tp_w2 = st.number_input("W-2 Fed Wages (Box 1)", 0.0, key="tpw")
+        tp_fwh = st.number_input("Fed Withheld (Box 2)", 0.0, key="tpf")
+        tp_swh = st.number_input("NJ State Withheld (Box 17)", 0.0, key="tps")
     with c2:
         if status == "Married Filing Jointly":
             st.markdown("### **Spouse**")
-            sp_w2 = st.number_input("W-2 Fed Wages", 0.0, key="sp_w2_input")
-            sp_fwh = st.number_input("Federal Withholding", 0.0, key="sp_fed_wh_input")
-            sp_swh = st.number_input("NJ State Withholding", 0.0, key="sp_nj_wh_input")
-        else: 
-            sp_w2 = sp_fwh = sp_swh = 0.0
+            sp_w2 = st.number_input("W-2 Fed Wages (Box 1)", 0.0, key="spw")
+            sp_fwh = st.number_input("Fed Withheld (Box 2)", 0.0, key="spf")
+            sp_swh = st.number_input("NJ State Withheld (Box 17)", 0.0, key="sps")
+        else: sp_w2 = sp_fwh = sp_swh = 0.0
     
-    inv_inc = st.number_input("Investment/Other Income (Interest, Dividends, etc.)", 0.0, key="invest_input")
+    inv_inc = st.number_input("Investment Income (1099-INT/DIV/B)", 0.0)
     total_gross = tp_w2 + sp_w2 + inv_inc
+
+with t2:
+    if mode == "Auto-Optimize (Max)":
+        hsa, prop_tax, mort_int = FED_DATA[status]["hsa_max"], 15000.0, st.number_input("Mortgage Interest", 0.0)
+    else:
+        st.info("Select deductions to trigger calculation logic.")
+        hsa = FED_DATA[status]["hsa_max"] if st.checkbox("Apply Max HSA") else 0.0
+        prop_tax = st.number_input("NJ Property Tax Paid", 0.0) if is_homeowner else 0.0
+        mort_int = st.number_input("Mortgage Interest Paid", 0.0)
 
 # --- CALCULATION ENGINE ---
 
-# 1. Federal Senior Deductions
-extra_sr_deduct = 0.0
-if u_age >= 65: extra_sr_deduct += FED_DATA[status]["sr_boost"]
-if s_age >= 65: extra_sr_deduct += FED_DATA[status]["sr_boost"]
-# OBBBA Senior Relief ($6k)
-if total_gross < 150000:
-    if u_age >= 65: extra_sr_deduct += 6000
-    if s_age >= 65: extra_sr_deduct += 6000
+# 1. Federal Senior Deduction (OBBBA Rules)
+extra_sr = 0.0
+if (u_age >= 65 or s_age >= 65) and total_gross < 150000:
+    extra_sr = 6000.0 * ((u_age >= 65) + (s_age >= 65))
 
-# 2. HSA Logic
-if mode == "Auto-Optimize (Max)":
-    hsa = FED_DATA[status]["hsa_max"]
-else:
-    hsa = FED_DATA[status]["hsa_max"] if st.checkbox("Apply Max HSA", key="hsa_chk") else 0.0
-
-# 3. Federal Tax
-fed_agi = max(0.0, total_gross - hsa - extra_sr_deduct)
-fed_taxable = max(0.0, fed_agi - FED_DATA[status]["std_deduct"])
-fed_tax = calc_tax(fed_taxable, FED_DATA[status]["brackets"])
+# 2. Federal Result
+fed_agi = max(0.0, total_gross - hsa - extra_sr)
+fed_tax = calc_tax(fed_agi - FED_DATA[status]["std_deduct"], FED_DATA[status]["brackets"])
 fed_res = (tp_fwh + sp_fwh) - fed_tax
 
-# 4. NJ State Logic (ANCHOR vs STAY NJ)
-with t2:
-    prop_tax = st.number_input("Total Annual Property Taxes Paid", 0.0, key="prop_tax_input") if is_homeowner else 0.0
-    mort_int = st.number_input("Mortgage Interest Paid", 0.0, key="mort_int_input")
-
+# 3. NJ State & Rebate Logic
 nj_taxable = max(0.0, total_gross - min(prop_tax, 15000.0))
 nj_tax = calc_tax(nj_taxable, NJ_BRACKETS_MFJ)
+nj_res = (tp_swh + sp_swh) - nj_tax
 
-anchor = 0.0
-stay_nj = 0.0
-benefit_name = "N/A"
-
+# NJ Property Tax Benefits (ANCHOR vs Stay NJ)
+rebate = 0.0
+rebate_type = "None"
 if is_homeowner:
-    # ANCHOR (Under 65: up to $1500, Over 65: +$250)
     sr_bonus = 250.0 if (u_age >= 65 or s_age >= 65) else 0.0
-    if total_gross <= 150000: anchor = 1500.0 + sr_bonus
-    elif total_gross <= 250000: anchor = 1000.0 + sr_bonus
+    anchor = 1500.0 + sr_bonus if total_gross <= 150000 else (1000.0 + sr_bonus if total_gross <= 250000 else 0.0)
+    stay_nj = min(6500.0, prop_tax * 0.50) if ((u_age >= 65 or s_age >= 65) and total_gross < 500000) else 0.0
     
-    # STAY NJ (Over 65 only, up to $6,500)
-    if (u_age >= 65 or s_age >= 65) and total_gross < 500000:
-        stay_nj = min(6500.0, prop_tax * 0.50)
-
-final_nj_benefit = max(anchor, stay_nj)
-benefit_name = "Stay NJ" if stay_nj > anchor else "ANCHOR"
+    rebate = max(anchor, stay_nj)
+    rebate_type = "Stay NJ" if stay_nj > anchor else "ANCHOR"
 
 with t3:
-    st.header("📊 Final 2026 Strategy Summary")
-    r1, r2, r3 = st.columns(3)
-    r1.metric("Federal Refund", f"${fed_res:,.0f}")
-    r2.metric("NJ State Refund", f"${(tp_swh + sp_swh - nj_tax):,.0f}")
-    
-    if is_homeowner:
-        r3.metric(f"NJ {benefit_name} Rebate", f"${final_nj_benefit:,.0f}")
-    else:
-        r3.metric("NJ Renter Credit", "$450") # NJ Renter Credit standard
+    st.header("📊 2026 Tax & Benefit Summary")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Federal Refund", f"${fed_res:,.0f}")
+    m2.metric("NJ State Refund", f"${nj_res:,.0f}")
+    m3.metric(f"NJ {rebate_type}", f"${rebate:,.0f}")
 
     st.divider()
-    total_impact = fed_res + (tp_swh + sp_swh - nj_tax) + (final_nj_benefit if is_homeowner else 450)
-    st.write(f"### **Total Cash Impact: ${total_impact:,.0f}**")
     
-    if u_age >= 65 or s_age >= 65:
-        st.info(f"👴 Senior Mode Active: Using {benefit_name} for maximum benefit.")
+    # Visualizations on the main page
+    c3, c4 = st.columns(2)
+    with c3:
+        df_pie = pd.DataFrame({
+            "Category": ["Federal Tax", "NJ State Tax", "Take Home Pay"],
+            "Amount": [fed_tax, nj_tax, total_gross - fed_tax - nj_tax]
+        })
+        fig = px.pie(df_pie, values="Amount", names="Category", hole=0.5, title="Annual Income Allocation")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with c4:
+        # Comparison of Gross vs Net
+        df_bar = pd.DataFrame({
+            "Stage": ["Total Gross", "After Fed Tax", "After NJ Tax", "After Rebate"],
+            "Cash": [total_gross, total_gross - fed_tax, total_gross - fed_tax - nj_tax, total_gross - fed_tax - nj_tax + rebate]
+        })
+        fig2 = px.bar(df_bar, x="Stage", y="Cash", text_auto='.2s', title="Cash Flow Progression")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    st.write(f"### **Estimated Net Cash Position: ${total_gross - fed_tax - nj_tax + rebate:,.0f}**")
