@@ -1,28 +1,30 @@
 import streamlit as st
 
-# --- 2026 CONFIGURATION (Filing 2025 Taxes) ---
-st.set_page_config(page_title="2026 Federal & NJ Tax Tracker", layout="wide")
+# --- 2026 OBBBA CONFIGURATION ---
+st.set_page_config(page_title="2026 Tax Optimizer", layout="wide")
 
-# Updated 2026 IRS Data (OBBBA 2025/2026 Rules)
+# Official 2026 IRS Data (OBBBA Adjusted)
 FED_DATA = {
     "Single": {
         "std_deduct": 16100, 
         "brackets": [(12400, 0.10), (50400, 0.12), (105700, 0.22), (201775, 0.24)],
         "salt_phaseout": 252500,
-        "salt_base_cap": 20200
+        "salt_base_cap": 20200,
+        "hsa_max": 4400,
+        "educator_max": 350
     },
     "Married Filing Jointly": {
         "std_deduct": 32200, 
         "brackets": [(24800, 0.10), (100800, 0.12), (211400, 0.22), (403550, 0.24)],
         "salt_phaseout": 505000,
-        "salt_base_cap": 40400
+        "salt_base_cap": 40400,
+        "hsa_max": 8750,
+        "educator_max": 700
     }
 }
-STATE_RATES = {"NJ": 0.055, "NY": 0.062, "CT": 0.055}
 
 def calculate_federal_tax(taxable_income, status):
-    tax = 0.0
-    prev_limit = 0.0
+    tax, prev_limit = 0.0, 0.0
     for limit, rate in FED_DATA[status]["brackets"]:
         if taxable_income > limit:
             tax += (limit - prev_limit) * rate
@@ -32,66 +34,77 @@ def calculate_federal_tax(taxable_income, status):
             break
     return tax
 
-# --- SIDEBAR ---
+# --- SIDEBAR & MODE SELECTOR ---
 with st.sidebar:
-    st.header("👤 Tax Profile")
-    status = st.selectbox("Filing Status", list(FED_DATA.keys()))
-    residence = st.selectbox("State of Residence", ["NJ", "NY", "CT"])
-    dependents = st.number_input("Children (Under 17)", 0, 10)
+    st.header("⚙️ App Settings")
+    mode = st.radio("Optimization Mode", ["Manual (Binary)", "Auto-Optimize (Max)"])
     st.divider()
-    if st.button("🗑️ Reset All Data"):
-        for key in list(st.session_state.keys()): del st.session_state[key]
-        st.rerun()
+    status = st.selectbox("Filing Status", list(FED_DATA.keys()))
+    is_senior = st.checkbox("Age 65 or older?")
+    dependents = st.number_input("Children (Under 17)", 0, 10)
 
 # --- INPUT TABS ---
-t_w2, t_invest, t_deduct = st.tabs(["💼 W-2 Wages", "📊 Investments & HYSA", "🏠 Deductions"])
+t_inc, t_deduct = st.tabs(["💰 Income & Investments", "📑 Deductions"])
 
-with t_w2:
-    st.subheader("W-2 Wage Statements")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Taxpayer**")
-        tp_wages = st.number_input("W-2 Box 1 (Fed Wages)", 0.0, key="tp_w")
-        tp_st_wages = st.number_input("W-2 Box 16 (State Wages)", 0.0, key="tp_sw")
-        tp_fed_wh = st.number_input("W-2 Box 2 (Fed Withheld)", 0.0, key="tp_fw")
-        tp_st_wh = st.number_input("W-2 Box 17 (State Withheld)", 0.0, key="tp_swh")
-        tp_work_st = st.selectbox("Work State", ["NJ", "NY", "CA"], key="tp_st")
-    
-    with col2:
-        if status == "Married Filing Jointly":
-            st.markdown("**Spouse**")
-            sp_wages = st.number_input("W-2 Box 1 (Fed Wages) ", 0.0, key="sp_w")
-            sp_st_wages = st.number_input("W-2 Box 16 (State Wages) ", 0.0, key="sp_sw")
-            sp_fed_wh = st.number_input("W-2 Box 2 (Fed Withheld) ", 0.0, key="sp_fw")
-            sp_st_wh = st.number_input("W-2 Box 17 (State Withheld) ", 0.0, key="sp_swh")
-            sp_work_st = st.selectbox("Work State ", ["NJ", "NY", "CA"], key="sp_st")
-        else:
-            sp_wages = sp_st_wages = sp_fed_wh = sp_st_wh = 0.0
-            sp_work_st = residence
-
-with t_invest:
-    st.subheader("1099 Income & Fidelity Data")
+with t_inc:
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("##### **Interest & Dividends**")
-        int_inc = st.number_input("1099-INT: Total Interest (HYSA)", 0.0)
-        ord_div = st.number_input("1099-DIV: Ordinary Dividends", 0.0)
+        wages = st.number_input("W-2 Fed Wages (Box 1)", 0.0)
+        st_wh = st.number_input("State Withholding (Box 17)", 0.0)
+        fed_wh = st.number_input("Fed Withholding (Box 2)", 0.0)
     with c2:
-        st.markdown("##### **Capital Gains/Losses**")
-        real_gl = st.number_input("Net Realized Gain/Loss", min_value=None, value=0.0)
-        carryover = st.number_input("Prior Year Loss Carryover", 0.0)
-
-    # Stock Loss Logic
-    net_stock = real_gl - carryover
-    loss_deduction = max(net_stock, -3000.0) if net_stock < 0 else net_stock
-    remaining_loss = net_stock - loss_deduction if net_stock < 0 else 0
+        inv_inc = st.number_input("Interest & Dividends", 0.0)
+        # Fix for negative capital losses
+        stock_gl = st.number_input("Net Realized Gain/Loss", min_value=None, value=0.0)
+    
+    # Stock Loss Logic ($3k limit)
+    loss_adj = max(stock_gl, -3000.0) if stock_gl < 0 else stock_gl
+    total_gross = wages + inv_inc + loss_adj
 
 with t_deduct:
-    st.subheader("Itemized Deductions")
-    st.info(f"The 2026 SALT cap is **${FED_DATA[status]['salt_base_cap']:,}** for your status.")
+    st.subheader("Potential 2026 Deductions")
     
-    col_salt, col_mort = st.columns(2)
-    with col_salt:
-        prop_tax = st.number_input("Property Taxes Paid", 0.0)
-        st_inc_tax = tp_st_wh + sp_st_wh # Auto-pulling from W-2 inputs
-        st.caption
+    if mode == "Auto-Optimize (Max)":
+        st.success("🚀 **Auto-Mode Active:** Legal maximums will be applied automatically.")
+        # Logic: Set values to the legal caps
+        hsa = FED_DATA[status]["hsa_max"]
+        student_loan = 2500.0
+        educator = FED_DATA[status]["educator_max"]
+        prop_tax = 15000.0 # Example high property tax
+        mort_int = st.number_input("Enter Mortgage Interest", 0.0)
+    else:
+        st.info("💡 **Manual Mode:** Check the boxes for the deductions you want to take.")
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            hsa = FED_DATA[status]["hsa_max"] if st.checkbox("Apply Max HSA") else 0.0
+            student_loan = 2500.0 if st.checkbox("Apply Student Loan Interest") else 0.0
+            educator = FED_DATA[status]["educator_max"] if st.checkbox("Apply Educator Expense") else 0.0
+        with col_b2:
+            prop_tax = st.number_input("Property Tax Paid", 0.0)
+            mort_int = st.number_input("Mortgage Interest", 0.0)
+
+# --- THE CALCULATION ENGINE ---
+
+# 1. Above-the-Line Deductions (Reducing AGI)
+# New OBBBA Senior Deduction ($6,000)
+senior_deduct = 6000.0 if is_senior else 0.0
+agi = max(0.0, total_gross - hsa - student_loan - educator - senior_deduct)
+
+# 2. SALT Calculation with Phase-out
+threshold = FED_DATA[status]['salt_phaseout']
+base_cap = FED_DATA[status]['salt_base_cap']
+# OBBBA Phase-out: Reduces cap by 30% of income over threshold, floor of $10k
+if agi > threshold:
+    current_salt_cap = max(10000.0, base_cap - ((agi - threshold) * 0.30))
+else:
+    current_salt_cap = base_cap
+
+actual_salt = min((prop_tax + st_wh), current_salt_cap)
+
+# 3. Itemize vs Standard
+itemized_total = actual_salt + mort_int
+final_deduction = max(itemized_total, FED_DATA[status]["std_deduct"])
+
+# 4. Final Tax Math
+taxable_inc = max(0.0, agi - final_deduction)
+fed_tax_due = calculate_federal_tax(tax
