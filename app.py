@@ -1,122 +1,118 @@
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 import pandas as pd
 
-# --- 2026 OBBBA CONFIGURATION ---
-st.set_page_config(page_title="2026 Tax Waterfall & Optimizer", layout="wide")
+# --- 2026 CONFIGURATION ---
+st.set_page_config(page_title="Universal 2026 Tax Optimizer", layout="wide")
 
 FED_DATA = {
     "Single": {
-        "std_deduct": 16100, 
-        "brackets": [(12400, 0.10), (50400, 0.12), (105700, 0.22), (201775, 0.24), (256225, 0.32), (640600, 0.35), (float('inf'), 0.37)],
-        "salt_phaseout": 252500,
-        "salt_base_cap": 20200,
-        "hsa_max": 4400
+        "std_deduct": 16100, "sr_boost": 2050, "obbb_sr": 6000,
+        "brackets": [(12400, 0.10), (50400, 0.12), (105700, 0.22), (201775, 0.24)],
+        "salt_base_cap": 20200, "salt_phaseout": 252500, "hsa_max": 4400
     },
     "Married Filing Jointly": {
-        "std_deduct": 32200, 
-        "brackets": [(24800, 0.10), (100800, 0.12), (211400, 0.22), (403550, 0.24), (512450, 0.32), (768700, 0.35), (float('inf'), 0.37)],
-        "salt_phaseout": 505000,
-        "salt_base_cap": 40400,
-        "hsa_max": 8750
+        "std_deduct": 32200, "sr_boost": 1650, "obbb_sr": 6000,
+        "brackets": [(24800, 0.10), (100800, 0.12), (211400, 0.22), (403550, 0.24)],
+        "salt_base_cap": 40400, "salt_phaseout": 505000, "hsa_max": 8750
     }
 }
 
-def get_tax_buckets(taxable_income, status):
-    buckets = []
-    prev_limit = 0.0
-    remaining = taxable_income
-    for limit, rate in FED_DATA[status]["brackets"]:
-        bracket_size = limit - prev_limit
-        amount_in_bracket = min(remaining, bracket_size)
-        if amount_in_bracket > 0:
-            buckets.append({"Bracket": f"{int(rate*100)}%", "Amount": amount_in_bracket, "Tax": amount_in_bracket * rate})
-            remaining -= amount_in_bracket
-            prev_limit = limit
+NJ_BRACKETS_MFJ = [(20000, 0.014), (50000, 0.0175), (70000, 0.0245), (80000, 0.035), (150000, 0.05525), (500000, 0.0637)]
+
+def calc_tax(income, brackets):
+    tax, prev = 0.0, 0.0
+    for limit, rate in brackets:
+        amt = min(income - prev, limit - prev)
+        if amt > 0:
+            tax += amt * rate
+            prev = limit
         else: break
-    return buckets
+    return tax
 
-# --- SIDEBAR ---
+# --- SIDEBAR: USER PROFILE ---
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("👤 User Profile")
+    status = st.selectbox("Filing Status", ["Married Filing Jointly", "Single"])
+    
+    # Generic age triggers
+    u_age = st.number_input("Your Age", 18, 100, 35)
+    s_age = 0
+    if status == "Married Filing Jointly":
+        s_age = st.number_input("Spouse Age", 18, 100, 35)
+    
+    is_homeowner = st.toggle("Homeowner in NJ?", value=True)
     mode = st.radio("Optimization Mode", ["Manual (Binary)", "Auto-Optimize (Max)"])
-    status = st.selectbox("Filing Status", list(FED_DATA.keys()))
-    dependents = st.number_input("Children (Under 17)", 0, 10)
 
-# --- INPUT TABS ---
-t_w2, t_invest, t_deduct = st.tabs(["💼 W-2 Wages", "📊 Investments", "📑 Deductions"])
+t1, t2, t3 = st.tabs(["💰 Income", "📑 Deductions & Credits", "📊 Results"])
 
-with t_w2:
-    col_tp, col_sp = st.columns(2)
-    with col_tp:
-        st.markdown("### **Taxpayer**")
-        tp_wages = st.number_input("W-2 Box 1 (Fed Wages)", 0.0, key="tp_w1")
-        tp_fed_wh = st.number_input("W-2 Box 2 (Fed Withheld)", 0.0, key="tp_w2")
-        tp_st_wh = st.number_input("W-2 Box 17 (State Withheld)", 0.0, key="tp_w17")
-    with col_sp:
-        if status == "Married Filing Jointly":
-            st.markdown("### **Spouse**")
-            sp_wages = st.number_input("W-2 Box 1 (Fed Wages)", 0.0, key="sp_w1")
-            sp_fed_wh = st.number_input("W-2 Box 2 (Fed Withheld)", 0.0, key="sp_w2")
-            sp_st_wh = st.number_input("W-2 Box 17 (State Withheld)", 0.0, key="sp_w17")
-        else: sp_wages = sp_fed_wh = sp_st_wh = 0.0
-
-with t_invest:
+with t1:
     c1, c2 = st.columns(2)
     with c1:
-        int_inc = st.number_input("Total Interest", 0.0)
-        ord_div = st.number_input("Ordinary Dividends", 0.0)
+        tp_w2 = st.number_input("Taxpayer W-2 Wages", 0.0)
+        tp_fwh = st.number_input("Fed Withheld", 0.0)
+        tp_swh = st.number_input("NJ State Withheld", 0.0)
     with c2:
-        stock_gl = st.number_input("Net Capital Gain/Loss", min_value=None, value=0.0)
-    loss_adj = max(stock_gl, -3000.0) if stock_gl < 0 else stock_gl
-    total_income = tp_wages + sp_wages + int_inc + ord_div + loss_adj
+        if status == "Married Filing Jointly":
+            sp_w2 = st.number_input("Spouse W-2 Wages", 0.0)
+            sp_fwh = st.number_input("Fed Withheld", 0.0)
+            sp_swh = st.number_input("NJ State Withheld", 0.0)
+        else: sp_w2 = sp_fwh = sp_swh = 0.0
+    
+    inv_inc = st.number_input("Investment/Other Income", 0.0)
+    total_gross = tp_w2 + sp_w2 + inv_inc
 
-with t_deduct:
-    if mode == "Auto-Optimize (Max)":
-        hsa, student_loan = FED_DATA[status]["hsa_max"], 2500.0
-        prop_tax, mort_int = 20000.0, st.number_input("Enter Mortgage Interest", 0.0)
-        ot_tips = 12500.0 # OBBBA Max for single taxpayer
-    else:
-        d1, d2 = st.columns(2)
-        with d1:
-            hsa = FED_DATA[status]["hsa_max"] if st.checkbox("Max HSA") else 0.0
-            student_loan = 2500.0 if st.checkbox("Max Student Loan Int") else 0.0
-            ot_tips = st.number_input("Overtime/Tips Deduction (OBBBA)", 0.0, 25000.0)
-        with d2:
-            prop_tax = st.number_input("Property Tax", 0.0)
-            mort_int = st.number_input("Mortgage Interest", 0.0)
+# --- CALCULATION LOGIC ---
 
-# --- CALC ENGINE ---
-agi = max(0.0, total_income - hsa - student_loan - ot_tips)
-base_cap, threshold = FED_DATA[status]["salt_base_cap"], FED_DATA[status]["salt_phaseout"]
-salt_cap = max(10000, base_cap - ((agi - threshold) * 0.30)) if agi > threshold else base_cap
-actual_salt = min((prop_tax + tp_st_wh + sp_st_wh), salt_cap)
-final_deduction = max(actual_salt + mort_int, FED_DATA[status]["std_deduct"])
-taxable_income = max(0.0, agi - final_deduction)
+# 1. Federal Senior Deductions (Triggered by Age)
+extra_sr_deduct = 0.0
+# Standard Sr Add-on
+if u_age >= 65: extra_sr_deduct += FED_DATA[status]["sr_boost"]
+if s_age >= 65: extra_sr_deduct += FED_DATA[status]["sr_boost"]
+# OBBBA Sr Boost ($6k each, phases out at $150k MFJ)
+if total_gross < 150000:
+    if u_age >= 65: extra_sr_deduct += 6000
+    if s_age >= 65: extra_sr_deduct += 6000
 
-buckets = get_tax_buckets(taxable_income, status)
-total_tax = sum(b['Tax'] for b in buckets) - (dependents * 2200) # OBBBA $2,200 Credit
-refund = (tp_fed_wh + sp_fed_wh) - total_tax
+# 2. HSA Logic
+if mode == "Auto-Optimize (Max)":
+    hsa = FED_DATA[status]["hsa_max"]
+else:
+    hsa = FED_DATA[status]["hsa_max"] if st.checkbox("Take Max HSA") else 0.0
 
-# --- ANALYTICS ---
-st.divider()
-col_res, col_chart = st.columns([1, 2])
+# 3. Federal Tax Result
+fed_agi = max(0.0, total_gross - hsa - extra_sr_deduct)
+fed_tax = calc_tax(fed_agi - FED_DATA[status]["std_deduct"], FED_DATA[status]["brackets"])
+fed_res = (tp_fwh + sp_fwh) - fed_tax
 
-with col_res:
-    st.metric("Final Refund/Owed", f"${refund:,.0f}")
-    st.metric("Taxable Income", f"${taxable_income:,.0f}")
-    st.write(f"Effective Rate: **{(total_tax/agi*100 if agi > 0 else 0):.1f}%**")
+# 4. NJ Benefit Logic (ANCHOR vs STAY NJ)
+prop_tax = st.number_input("Annual Property Taxes", 0.0) if is_homeowner else 0.0
+nj_taxable = max(0.0, total_gross - min(prop_tax, 15000.0))
+nj_tax = calc_tax(nj_taxable, NJ_BRACKETS_MFJ)
 
-with col_chart:
-    st.subheader("Tax Bracket Waterfall")
-    df_tax = pd.DataFrame(buckets)
-    fig_tax = px.bar(df_tax, x="Bracket", y="Amount", text=df_tax['Tax'].apply(lambda x: f"${x:,.0f} tax"),
-                     title="Income Distribution Across Brackets", color="Bracket", color_discrete_sequence=px.colors.qualitative.Prism)
-    st.plotly_chart(fig_tax, use_container_width=True)
+anchor = 0.0
+stay_nj = 0.0
 
-if status == "Married Filing Jointly":
-    st.write("### **Household Income Split**")
-    fig_pie = px.pie(values=[tp_wages, sp_wages, total_income - (tp_wages+sp_wages)], 
-                     names=["Taxpayer", "Spouse", "Other"], hole=0.4)
-    st.plotly_chart(fig_pie)
+if is_homeowner:
+    # ANCHOR (Age 65+ gets +$250)
+    sr_bonus = 250.0 if (u_age >= 65 or s_age >= 65) else 0.0
+    if total_gross <= 150000: anchor = 1500.0 + sr_bonus
+    elif total_gross <= 250000: anchor = 1000.0 + sr_bonus
+    
+    # STAY NJ (Only triggers if Age 65+ and income < $500k)
+    if (u_age >= 65 or s_age >= 65) and total_gross < 500000:
+        stay_nj = min(6500.0, prop_tax * 0.50)
+
+# The "Greater Of" Logic
+final_nj_benefit = max(anchor, stay_nj)
+benefit_name = "Stay NJ" if stay_nj > anchor else "ANCHOR"
+
+with t3:
+    st.header("📊 Total 2026 Strategy")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Federal Refund", f"${fed_res:,.0f}")
+    m2.metric("NJ State Refund", f"${(tp_swh + sp_swh - nj_tax):,.0f}")
+    m3.metric(f"NJ {benefit_name} Rebate", f"${final_nj_benefit:,.0f}")
+
+    if extra_sr_deduct > 0:
+        st.success(f"👴 Senior Benefits Active: ${extra_sr_deduct:,.0f} extra federal deduction applied.")
