@@ -107,4 +107,24 @@ final_deduction = max(itemized_total, FED_DATA[status]["std_deduct"])
 
 # 4. Final Tax Math
 taxable_inc = max(0.0, agi - final_deduction)
-fed_tax_due = calculate_federal_tax(tax
+fed_tax_due = calculate_federal_tax(taxable_inc, status) - (dependents * 2000)
+refund_owed = fed_wh - fed_tax_due
+
+# --- DISPLAY RESULTS ---
+st.divider()
+st.header("📊 2026 Tax Summary")
+m1, m2, m3 = st.columns(3)
+
+with m1:
+    st.metric("Adjusted Gross Income", f"${agi:,.0f}")
+    st.caption(f"Method: {'Itemized' if itemized_total > FED_DATA[status]['std_deduct'] else 'Standard'}")
+
+with m2:
+    if refund_owed >= 0:
+        st.success(f"Federal Refund: ${refund_owed:,.0f}")
+    else:
+        st.error(f"Federal Owed: ${abs(refund_owed):,.0f}")
+
+with m3:
+    st.metric("Active SALT Cap", f"${current_salt_cap:,.0f}")
+    st.caption("Includes OBBBA phase-out if applicable.")
