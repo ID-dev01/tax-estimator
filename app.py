@@ -1,52 +1,72 @@
 import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
 
-# --- 2025-2026 CAPS ---
-NJ_CAPS = {"UI": 184.02, "FLI": 545.82, "DI": 380.42}
-NY_CAPS = {"PFL": 354.53, "SDI": 31.20}
+# --- 2025 TAX RULES ---
+RULES = {
+    "NJ_Brackets": [(20000, 0.014), (50000, 0.0175), (70000, 0.0245), (80000, 0.035), (150000, 0.05525), (500000, 0.0637)],
+    "NY_Brackets": [(17150, 0.04), (23600, 0.045), (27900, 0.0525), (161550, 0.055), (323200, 0.06)],
+    "MFS_NJ_Brackets": [(20000, 0.014), (50000, 0.0175), (70000, 0.0245), (80000, 0.035), (150000, 0.05525), (500000, 0.0637)] 
+}
 
-st.set_page_config(page_title="NJ/NY Final Auditor", layout="wide")
-st.title("🛡️ Final Household Tax Auditor")
+def calc_tax(income, brackets):
+    tax, prev = 0.0, 0.0
+    for limit, rate in brackets:
+        amt = min(income - prev, limit - prev)
+        if amt > 0: tax += amt * rate; prev = limit
+        else: break
+    return tax
 
-col_in, col_res = st.columns([1.5, 1])
+st.set_page_config(page_title="NJ Filing Status Comparison", layout="wide")
+st.title("⚖️ NJ Filing Status: Joint vs. Separate")
+
+col_in, col_viz = st.columns([1.5, 1], gap="large")
 
 with col_in:
-    st.subheader("W-2 Audit (Box 14 & 17)")
+    st.subheader("W-2 Inputs")
+    c1, c2 = st.columns(2)
+    tp_b1 = c1.number_input("Your Box 1 (NJ Worker)", 0.0, value=85000.0)
+    tp_wh = c1.number_input("Your NJ Withholding (Box 17)", 0.0, value=3500.0)
     
-    # TAXPAYER
-    st.info("👤 **Taxpayer (NJ Worker)**")
-    t_fwh = st.number_input("Fed Withholding (Box 2)", 0.0, key="t2")
-    t_swh = st.number_input("NJ Withholding (Box 17)", 0.0, key="t17")
-    st.caption(f"Your Box 14: UI ${NJ_CAPS['UI']} | FLI $545.78 (At Cap)")
+    sp_b1 = c2.number_input("Spouse Box 1 (NY Worker)", 0.0, value=95000.0)
+    sp_ny_tax = c2.number_input("Spouse NY Tax Paid", 0.0, value=5200.0)
 
-    # SPOUSE
-    st.warning("🗽 **Spouse (NY Worker)**")
-    s_fwh = st.number_input("Spouse Fed Wh (Box 2)", 0.0, key="s2")
-    s_swh_ny = st.number_input("NY State Tax (Box 17)", 0.0, key="s17ny")
-    st.caption(f"Her Box 14: NY PFL ${NY_CAPS['PFL']} | SDI ${NY_CAPS['SDI']} (At Cap)")
+# --- COMPARISON LOGIC ---
+# SCENARIO 1: Joint (MFJ)
+joint_income = tp_b1 + sp_b1
+joint_tax_raw = calc_tax(joint_income, RULES["NJ_Brackets"])
+# NY Credit for Joint
+joint_credit = min(sp_ny_tax, joint_tax_raw * (sp_b1 / joint_income))
+joint_final_tax = max(0, joint_tax_raw - joint_credit)
+joint_refund = tp_wh - joint_final_tax
 
-    # TOTAL HOUSEHOLD INCOME
-    total_income = st.number_input("Total Household Income (Box 1 Sum)", 0.0)
+# SCENARIO 2: Separate (MFS)
+# You (NJ Only)
+tp_tax_sep = calc_tax(tp_b1, RULES["MFS_NJ_Brackets"])
+tp_refund_sep = tp_wh - tp_tax_sep
 
-# --- THE AUDIT LOGIC ---
-# 1. Calculate Estimated NJ Tax (Simplified)
-# For a typical NJ/NY family, the NY credit often makes the "Effective NJ Tax Rate" very low.
-est_nj_tax_before_credit = total_income * 0.04 # Rough 4% bracket
-ny_credit = s_swh_ny # Often the credit is the full amount paid to NY
+# Spouse (NY Only - effectively $0 NJ tax due to credit)
+sp_tax_raw_sep = calc_tax(sp_b1, RULES["MFS_NJ_Brackets"])
+sp_credit_sep = min(sp_ny_tax, sp_tax_raw_sep)
+sp_refund_sep = 0 - (sp_tax_raw_sep - sp_credit_sep) # Assuming 0 NJ withholding for her
 
-# 2. Final Liability
-final_nj_liability = max(0, est_nj_tax_before_credit - ny_credit)
-nj_refund = t_swh - final_nj_liability
+total_sep_refund = tp_refund_sep + sp_refund_sep
 
-with col_res:
-    st.subheader("The Refund Verdict")
-    if nj_refund > (t_swh * 0.8):
-        st.success(f"**Massive NJ Refund Estimated:** ~${nj_refund:,.2f}")
-        st.write("### Why?")
-        st.write(f"1. Your spouse paid **${s_swh_ny:,.2f}** to NY.")
-        st.write("2. NJ credits almost all of that against your joint bill.")
-        st.write(f"3. Your NJ withholding of **${t_swh:,.2f}** is now 'excess' money.")
+with col_viz:
+    st.subheader("The Verdict")
+    
+    fig = go.Figure(data=[
+        go.Bar(name='Joint (MFJ)', x=['Refund Amount'], y=[joint_refund], marker_color='#002d72'),
+        go.Bar(name='Separate (MFS)', x=['Refund Amount'], y=[total_sep_refund], marker_color='#28a745')
+    ])
+    fig.update_layout(barmode='group', height=300, margin=dict(t=0, b=0, l=0, r=0))
+    st.plotly_chart(fig, use_container_width=True)
+
+    diff = total_sep_refund - joint_refund
+    if diff > 0:
+        st.success(f"📈 **Filing Separately** could save you **${diff:,.2f}** in NJ!")
     else:
-        st.metric("Estimated NJ Refund", f"${nj_refund:,.2f}")
+        st.info(f"📉 **Filing Jointly** is better by **${abs(diff):,.2f}**.")
 
-    st.divider()
-    st.info("📝 **CPA Note:** Tell your CPA: 'My spouse's NY tax credit is wiping out our NJ liability. I want to ensure my NJ-1040 Schedule G is maximizing the credit for taxes paid to NY.'")
+    with st.expander("Why the difference?"):
+        st.write("When you file **Jointly**, your spouse's income pushes your household into a **higher tax bracket** (e.g., jumping from 3.5% to 5.5%). Even with the NY credit, you might end up paying a higher rate on *your* NJ income than you would if you filed alone.")
