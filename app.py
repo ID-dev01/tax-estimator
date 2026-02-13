@@ -110,4 +110,6 @@ with col_res:
     st.download_button(
         label="📥 Download Audit Data for CPA",
         data=csv,
-        file_name=f"tax_audit_{
+        file_name=f"tax_audit_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+    )
