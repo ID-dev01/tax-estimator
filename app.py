@@ -2,7 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 
-# --- 2026 MASTER DATA (OBBBA Compliant) ---
+# --- 2026 MASTER DATA (OBBBA LEGISLATION) ---
 LAW_2026 = {
     "Fed": {
         "MFJ": {
@@ -11,8 +11,8 @@ LAW_2026 = {
         }
     },
     "NJ": {
-        "brackets": [(20000, 0.014), (50000, 0.0175), (70000, 0.0245), (80000, 0.035), (150000, 0.05525), (500000, 0.0637), (float('inf'), 0.1075)],
-        "prop_cap": 15000, "exemption": 1000
+        "brackets": [(20000, 0.014), (50000, 0.0175), (70000, 0.0245), (80000, 0.035), (150000, 0.05525), (500000, 0.0637), (1000000, 0.0897), (float('inf'), 0.1075)],
+        "prop_cap": 15000, "exemption": 1000, "529_limit": 200000
     }
 }
 
@@ -26,113 +26,97 @@ def calc_tax(income, brackets):
         else: break
     return tax
 
-st.set_page_config(layout="wide", page_title="2026 Tax Auditor")
-st.title("📊 2026 Master Tax Auditor & Paycheck Fixer")
+st.set_page_config(layout="wide", page_title="2026 Tax Auditor Pro")
+st.title("🛡️ 2026 Master Tax Auditor & Strategic Planner")
 
-# --- SIDEBAR: PRE-TAX PLANNING ---
+# --- 1. SIDEBAR STRATEGY ---
 with st.sidebar:
-    st.header("🚀 2026 Planning Tools")
-    st.info("Simulate how 'Pre-Tax' increases affect your final refund.")
-    add_contrib = st.slider("Potential Extra 401(k) Contribution", 0, 30000, 0)
-    pay_periods = st.number_input("Paychecks left in 2026", 1, 26, 20)
+    st.header("📈 Strategy Controls")
+    bunch_years = st.radio("Charity Bunching Cycle", [1, 2], index=0, help="2 = Pre-pay next year's charity to beat the 0.5% AGI floor.")
+    add_401k = st.slider("Increase Pre-Tax Savings (Box 12)", 0, 30000, 0)
+    pay_periods = st.number_input("Paychecks Remaining in 2026", 1, 26, 20)
+    st.divider()
+    st.subheader("🎓 Education & State")
+    nj_529 = st.number_input("NJ 529 Contrib (max $10k)", 0, 10000, 0)
 
-# --- 1. INCOME INPUTS ---
+# --- 2. INCOME INPUTS (SPOUSE SPLIT) ---
 col_u, col_s = st.columns(2)
-
 with col_u:
     st.header("👤 Your Income (NJ)")
-    y_wages = st.number_input("Federal Wages (W-2 Box 1)", value=145000.0, key="y_w1", help="This is your total taxable income after 401k/Health premiums are removed.")
-    y_fwh = st.number_input("Federal Withheld (W-2 Box 2)", value=19000.0, key="y_f2")
-    y_swh = st.number_input("NJ State Withheld (W-2 Box 17)", value=7000.0, key="y_s17")
-    y_k = st.number_input("401(k) Contribution (W-2 Box 12, Code D)", value=10000.0, key="y_b12", help="Code D shows your traditional 401k contributions. This reduces your taxable income.")
+    y_w1 = st.number_input("Wages (W-2 Box 1)", value=145000.0, key="y_w1")
+    y_f2 = st.number_input("Fed Withheld (W-2 Box 2)", value=19000.0, key="y_f2")
+    y_s17 = st.number_input("NJ Withheld (W-2 Box 17)", value=7000.0, key="y_s17")
+    y_b12 = st.number_input("401k Contrib (W-2 Box 12, Code D)", value=10000.0, key="y_b12")
 
 with col_s:
     st.header("👤 Spouse Income (NY)")
-    s_wages = st.number_input("Federal Wages (W-2 Box 1)", value=135000.0, key="s_w1")
-    s_fwh = st.number_input("Federal Withheld (W-2 Box 2)", value=17000.0, key="s_f2")
-    s_ny_tax = st.number_input("Actual NY Tax Paid (W-2 Box 17 / NY IT-203)", value=9500.0, key="s_s17", help="Use the final liability from your NY return, not just the withholding.")
-    s_k = st.number_input("401(k) Contribution (W-2 Box 12, Code D)", value=10000.0, key="s_b12")
+    s_w1 = st.number_input("Wages (W-2 Box 1)", value=135000.0, key="s_w1")
+    s_f2 = st.number_input("Fed Withheld (W-2 Box 2)", value=17000.0, key="s_f2")
+    s_ny_wh = st.number_input("NY Withheld (W-2 Box 17)", value=11000.0, key="s_ny_wh")
+    s_ny_liab = st.number_input("Actual NY Tax (Estimate)", value=9500.0, key="s_ny_liab")
+    s_b12 = st.number_input("401k Contrib (W-2 Box 12, Code D)", value=10000.0, key="s_b12")
 
+# --- 3. DEDUCTIONS ---
 st.divider()
-c1, c2 = st.columns(2)
-prop_tax = c1.number_input("Property Taxes Paid", value=16500.0)
-mrtg_int = c1.number_input("Mortgage Interest", value=22000.0)
-kids = c2.number_input("Qualifying Children (<17)", value=2)
+st.header("🏠 Household Deductions")
+d1, d2, d3 = st.columns(3)
+prop_tax = d1.number_input("Property Taxes", value=16000.0)
+mrtg_int = d1.number_input("Mortgage Interest", value=22000.0)
+med_exp = d2.number_input("Medical Costs", value=2000.0)
+charity = d2.number_input("Annual Charity", value=8000.0)
+kids = d3.number_input("Kids < 17", value=2)
 
-# --- 2. THE CALCULATION ENGINE ---
-agi = (y_wages + s_wages) - add_contrib 
+# --- 4. ENGINE: CALCULATION ---
+agi = (y_w1 + s_w1) - add_401k
 f_conf = LAW_2026["Fed"]["MFJ"]
 
-# SALT Calculation
+# Federal Itemizing (with 2026 Floors)
 salt_cap = max(10000, f_conf["salt_cap"] - (max(0, agi - f_conf["salt_phase"]) * 0.30))
-total_salt_paid = prop_tax + y_swh + s_ny_tax
-allowed_salt = min(total_salt_paid, salt_cap)
+allowed_salt = min(prop_tax + y_s17 + s_ny_wh, salt_cap)
+fed_med = max(0, med_exp - (agi * 0.075))
+fed_charity = max(0, (charity * bunch_years) - (agi * 0.005))
 
-# Federal Liability
-fed_deduct = max(f_conf["std"], mrtg_int + allowed_salt)
-fed_taxable = max(0, agi - fed_deduct)
-ctc = max(0, (kids * f_conf["ctc"]) - ((max(0, agi - f_conf["ctc_phase"]) // 1000) * 50))
-fed_liab = max(0, calc_tax(fed_taxable, f_conf["brackets"]) - ctc)
-fed_diff = (y_fwh + s_fwh) - fed_liab
+fed_itemized = mrtg_int + allowed_salt + fed_med + fed_charity
+fed_deduction = max(f_conf["std"], fed_itemized)
+fed_liab = max(0, calc_tax(agi - fed_deduction, f_conf["brackets"]) - (kids * f_conf["ctc"]))
+fed_bal = (y_f2 + s_f2) - fed_liab
 
-# NJ Resident Credit (Schedule NJ-COJ)
-nj_taxable = max(0, agi - min(prop_tax, 15000) - (kids * 1000) - 2000)
+# NJ State (NJ-COJ & ANCHOR)
+nj_med = max(0, med_exp - (agi * 0.02))
+nj_529_deduct = nj_529 if agi <= 200000 else 0
+nj_taxable = max(0, agi - min(prop_tax, 15000) - (kids * 1000) - 2000 - nj_med - nj_529_deduct)
 nj_tax_pre_credit = calc_tax(nj_taxable, LAW_2026["NJ"]["brackets"])
-# Ratio of Spouse NY income to total AGI
-nj_credit_ratio = (s_wages - s_k) / max(1, agi)
-nj_credit = min(s_ny_tax, nj_tax_pre_credit * nj_credit_ratio)
-nj_liab = nj_tax_pre_credit - nj_credit
-nj_diff = y_swh - nj_liab
+nj_credit = min(s_ny_liab, nj_tax_pre_credit * ((s_w1 - s_b12) / max(1, agi)))
+nj_bal = y_s17 - (nj_tax_pre_credit - nj_credit)
 
-# --- 3. THE GRAPHS (RESTORED) ---
-st.header("📊 Interactive Visuals")
-g1, g2, g3 = st.columns(3)
+# ANCHOR Logic
+anchor_amt = 0
+if agi <= 150000: anchor_amt = 1500
+elif agi <= 250000: anchor_amt = 1000
 
+# --- 5. RESULTS & CHARTS ---
+st.divider()
+st.header("🏁 Final Settlement Summary")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Federal (IRS)", f"${fed_bal:,.2f}")
+m2.metric("New Jersey", f"${nj_bal:,.2f}")
+m3.metric("New York", f"${s_ny_wh - s_ny_liab:,.2f}")
+m4.metric("ANCHOR Rebate", f"${anchor_amt:,.0f}", help="Paid separately via check")
+
+g1, g2 = st.columns(2)
 with g1:
-    fig_pie = go.Figure(data=[go.Pie(
-        labels=['Take Home', 'Fed Tax', 'NJ State Tax', 'Deductions'],
-        values=[agi - fed_liab - nj_liab, fed_liab, nj_liab, fed_deduct],
-        hole=.4, marker_colors=['#2ECC71', '#E74C3C', '#F1C40F', '#3498DB']
-    )])
-    fig_pie.update_layout(title="Income Allocation", margin=dict(t=30, b=0, l=0, r=0))
+    fig_pie = go.Figure(data=[go.Pie(labels=['Take Home', 'Fed Tax', 'State Taxes', 'Deductions/Savings'], 
+                                    values=[agi-fed_liab-nj_tax_pre_credit, fed_liab, nj_tax_pre_credit, fed_deduction+y_b12+s_b12], hole=.4)])
     st.plotly_chart(fig_pie, use_container_width=True)
 
 with g2:
-    fig_salt = go.Figure(go.Indicator(
-        mode = "gauge+number", value = allowed_salt,
-        title = {'text': f"SALT Cap: ${salt_cap:,.0f}"},
-        gauge = {'axis': {'range': [0, 40000]}, 'bar': {'color': "#3498DB"},
-                 'threshold': {'line': {'color': "red", 'width': 4}, 'value': salt_cap}}
-    ))
-    fig_salt.update_layout(height=250)
+    fig_salt = go.Figure(go.Indicator(mode="gauge+number", value=allowed_salt, title={'text': f"SALT Cap: ${salt_cap:,.0f}"},
+                                     gauge={'axis': {'range': [0, 40000]}, 'threshold': {'line': {'color': "red", 'width': 4}, 'value': salt_cap}}))
     st.plotly_chart(fig_salt, use_container_width=True)
 
-with g3:
-    fig_nj = go.Figure(data=[
-        go.Bar(name='Gross NJ Tax', x=['Tax'], y=[nj_tax_pre_credit], marker_color='#E74C3C'),
-        go.Bar(name='NY Credit', x=['Tax'], y=[nj_credit], marker_color='#2ECC71')
-    ])
-    fig_nj.update_layout(barmode='stack', title="NJ-NY Tax Shield", height=250)
-    st.plotly_chart(fig_nj, use_container_width=True)
-
-# --- 4. THE PAYCHECK FIXER ---
+# --- 6. ACTION PLAN ---
 st.divider()
-st.header("🛠️ Paycheck Correction (W-4)")
-total_due = fed_diff + nj_diff
-if total_due < -500:
-    st.error(f"Underpayment: You are on track to owe **${abs(total_due):,.2f}**.")
-    f_fix = abs(min(0, fed_diff))/pay_periods
-    n_fix = abs(min(0, nj_diff))/pay_periods
-    
-    fx1, fx2 = st.columns(2)
-    fx1.metric("Federal W-4 Line 4(c)", f"${f_fix:,.2f} / check")
-    fx2.metric("NJ-W4 Line 5", f"${n_fix:,.2f} / check")
-else:
-    st.success(f"Estimated Refund: **${total_due:,.2f}**")
-
-# --- 5. SUMMARY TABLE ---
-with st.expander("🔍 View Technical Filing Details"):
-    st.table(pd.DataFrame({
-        "Category": ["Federal AGI", "Fed Taxable", "NJ Taxable", "NY Resident Credit"],
-        "Value": [f"${agi:,.2f}", f"${fed_taxable:,.2f}", f"${nj_taxable:,.2f}", f"${nj_credit:,.2f}"]
-    }))
+if (fed_bal + nj_bal) < -500:
+    st.error(f"⚠️ Underpayment: Increase Federal withholding by ${abs(fed_bal/pay_periods):,.2f} and NJ by ${abs(nj_bal/pay_periods):,.2f} per check.")
+if nj_529 > 0 and agi > 200000:
+    st.warning(f"Note: Your NJ 529 deduction of ${nj_529:,.0f} was disallowed because income exceeds $200k.")
