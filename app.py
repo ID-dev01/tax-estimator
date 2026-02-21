@@ -1,151 +1,124 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+import pandas as pd
 
-# --- 2025-2026 TAX DATA (Verified) ---
-LAW = {
+# --- 2026 AUDITOR DATA ---
+LAW_2026 = {
     "Fed": {
-        "std": 31500.0, 
-        "brackets": [(23850, 0.10), (96950, 0.12), (206700, 0.22), (394600, 0.24), (501050, 0.32), (751600, 0.35)],
-        "ctc": 2200.0, 
-        "salt_cap": 10000.0,
-        "hsa_limit": 8550.0,
-        "401k_limit": 23500.0
+        "MFJ": {"std": 32200, "salt_cap": 40000, "salt_phase": 500000, "ctc": 2200, "ctc_phase": 400000,
+                "brackets": [(23850, 0.10), (96950, 0.12), (206700, 0.22), (394600, 0.24), (501050, 0.32), (751600, 0.35), (float('inf'), 0.37)]},
+        "Single": {"std": 16100, "salt_cap": 40000, "salt_phase": 500000, "ctc": 2200, "ctc_phase": 200000,
+                   "brackets": [(11925, 0.10), (48475, 0.12), (103350, 0.22), (197300, 0.24), (250525, 0.32), (626350, 0.35), (float('inf'), 0.37)]}
     },
     "NJ": {
-        "brackets": [(20000, 0.014), (50000, 0.0175), (70000, 0.0245), (80000, 0.035), (150000, 0.05525), (500000, 0.0637)],
-        "prop_cap": 15000.0,
-        "exemption": 1000.0
-    },
-    "NY": {
-        "std": 16050.0,
-        "brackets": [(17150, 0.04), (23600, 0.045), (27900, 0.0525), (161550, 0.055), (323200, 0.06)]
+        "MFJ": [(20000, 0.014), (50000, 0.0175), (70000, 0.0245), (80000, 0.035), (150000, 0.05525), (500000, 0.0637), (1000000, 0.0897), (float('inf'), 0.1075)],
+        "prop_cap": 15000, "exemption": 1000
     }
 }
 
-def calc_tax(taxable, brackets):
+def calc_tax(income, brackets):
     tax, prev = 0.0, 0.0
     for limit, rate in brackets:
-        if taxable > prev:
-            amt = min(taxable, limit) - prev
+        if income > prev:
+            amt = min(income, limit) - prev
             tax += amt * rate
             prev = limit
-    # Handle top bracket overflow
-    if taxable > brackets[-1][0]:
-        top_rate = 0.37 if len(brackets) > 5 else brackets[-1][1]
-        tax += (taxable - brackets[-1][0]) * top_rate
+        else: break
     return tax
 
-st.set_page_config(layout="wide", page_title="2025 Final Tax Auditor")
+st.set_page_config(layout="wide", page_title="2026 NJ/NY Tax Auditor")
+st.title("📊 2026 Multi-State Tax Auditor & Savings Planner")
 
-# --- UI LAYOUT ---
-st.title("🛡️ 2025-2026 Household Tax Auditor & Visualizer")
-st.markdown("---")
+# --- SIDEBAR: PRE-TAX PLANNING ---
+with st.sidebar:
+    st.header("🚀 Pre-Tax Planning")
+    st.info("Every $1,000 you move to 'Pre-Tax' reduces your Federal & State taxable income.")
+    add_401k = st.slider("Additional 401(k) Contribution", 0, 24500, 5000)
+    add_hsa = st.slider("Additional HSA (Family)", 0, 8750, 3000)
+    total_pretax_shift = add_401k + add_hsa
 
-col_in, col_res = st.columns([1.5, 1], gap="large")
+# --- MAIN INPUTS ---
+col_in, col_res = st.columns([1, 1.2], gap="large")
 
 with col_in:
-    # Section 1: Income
-    st.subheader("1. W-2 Income & Withholding")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**👤 Your W-2 (NJ)**")
-        y_b1 = st.number_input("Box 1: Fed Wages", 0.0, key="y1")
-        y_b16 = st.number_input("Box 16: NJ Wages", 0.0, key="y16")
-        y_fwh = st.number_input("Box 2: Fed Withheld", 0.0, key="y2")
-        y_swh = st.number_input("Box 17: NJ Withheld", 0.0, key="y17")
-    with c2:
-        st.markdown("**🗽 Spouse W-2 (NY)**")
-        s_b1 = st.number_input("Box 1: Fed Wages ", 0.0, key="s1")
-        s_b16 = st.number_input("Box 16: NY Wages ", 0.0, key="s16")
-        s_fwh = st.number_input("Box 2: Fed Withheld ", 0.0, key="s2")
-        s_ny_wh = st.number_input("Box 17: NY Tax Paid", 0.0, key="s17ny")
+    st.header("1. Income & Filing")
+    status = st.selectbox("Filing Status", ["MFJ", "Single"])
+    f_conf = LAW_2026["Fed"][status]
+    
+    y_b1 = st.number_input("Your NJ Wages (W2 Box 1)", value=145000.0)
+    s_b1 = st.number_input("Spouse NY Wages (W2 Box 1)", value=135000.0) if status == "MFJ" else 0.0
+    y_fwh = st.number_input("Total Fed Withheld (Household)", value=38000.0)
+    y_swh = st.number_input("NJ Withheld (Box 17)", value=6500.0)
+    s_ny_liab = st.number_input("Actual NY Tax Liability (from NY IT-203)", value=9200.0) if status == "MFJ" else 0.0
+    
+    st.header("2. SALT & Property")
+    prop_tax = st.number_input("Property Taxes", value=16500.0)
+    mrtg_int = st.number_input("Mortgage Interest", value=22000.0)
+    kids = st.number_input("Kids < 17", value=2)
 
-    # Section 2: Investments
-    st.subheader("2. 1099 Interest & Brokerage")
-    b1, b2, b3 = st.columns(3)
-    int_inc = b1.number_input("1099-INT Interest", 0.0)
-    brk_gain = b2.number_input("Brokerage Gains", 0.0)
-    brk_loss = b3.number_input("Brokerage Losses (Positive #)", 0.0)
+# --- ENGINE ---
+# Adjusted Gross Income (Applying your Pre-Tax Planning)
+agi = (y_b1 + s_b1) - total_pretax_shift
 
-    # Section 3: Deductions
-    st.subheader("3. 1098 Home & Family")
-    h1, h2, h3 = st.columns(3)
-    mrtg_int = h1.number_input("Mortgage Interest", 0.0)
-    prop_tax = h2.number_input("Property Taxes Paid", 0.0)
-    num_kids = h3.number_input("Children Under 17", 0, 10, 0)
+# SALT 2026 Logic
+salt_cap = max(10000, f_conf["salt_cap"] - (max(0, agi - f_conf["salt_phase"]) * 0.30))
+actual_salt_deduction = min(prop_tax + y_swh + s_ny_liab, salt_cap)
 
-# --- CALCULATIONS ---
-# Investment Netting
-net_inv = brk_gain - brk_loss
-fed_inv_impact = max(net_inv, -3000.0) # Fed allows $3k loss
-nj_inv_impact = max(0, net_inv)        # NJ does NOT allow wage offsets
+# Federal Liability
+fed_deduct = max(f_conf["std"], mrtg_int + actual_salt_deduction)
+fed_taxable = max(0, agi - fed_deduct)
+ctc = max(0, (kids * f_conf["ctc"]) - ((max(0, agi - f_conf["ctc_phase"]) // 1000) * 50))
+fed_liab = max(0, calc_tax(fed_taxable, f_conf["brackets"]) - ctc)
+fed_result = y_fwh - fed_liab
 
-# Federal Math
-fed_agi = y_b1 + s_b1 + int_inc + fed_inv_impact
-salt_total = min(LAW["Fed"]["salt_cap"], prop_tax + y_swh + s_ny_wh)
-fed_deduction = max(LAW["Fed"]["std"], mrtg_int + salt_total)
-fed_taxable = max(0, fed_agi - fed_deduction)
-fed_liab = calc_tax(fed_taxable, LAW["Fed"]["brackets"])
-fed_final_tax = max(0, fed_liab - (num_kids * LAW["Fed"]["ctc"]))
-fed_result = (y_fwh + s_fwh) - fed_final_tax
+# NJ Resident Credit (Schedule NJ-COJ)
+nj_gross = agi 
+nj_taxable = max(0, nj_gross - min(prop_tax, 15000) - (kids * 1000) - 2000)
+nj_tax_pre_credit = calc_tax(nj_taxable, LAW_2026["NJ"]["MFJ"])
 
-# NJ State Math
-nj_gross = y_b16 + s_b1 + int_inc + nj_inv_impact
-nj_deduct = 2000.0 + (num_kids * LAW["NJ"]["exemption"]) + min(prop_tax, LAW["NJ"]["prop_cap"])
-nj_taxable = max(0, nj_gross - nj_deduct)
-nj_tax_raw = calc_tax(nj_taxable, LAW["NJ"]["brackets"])
+# NJ-COJ Formula: Lesser of NY Tax or (NJ Tax * (NY_Income / Total_Income))
+income_ratio = s_b1 / max(1, nj_gross)
+nj_credit_limit = nj_tax_pre_credit * income_ratio
+nj_credit = min(s_ny_liab, nj_credit_limit)
+nj_final_liab = nj_tax_pre_credit - nj_credit
+nj_result = y_swh - nj_final_liab
 
-# NY Credit Calculation (The Resident Credit)
-ny_liab = calc_tax(max(0, s_b1 - LAW["NY"]["std"]), LAW["NY"]["brackets"])
-nj_credit = min(ny_liab, nj_tax_raw * (s_b1 / max(1, nj_gross)))
-nj_final_tax = max(0, nj_tax_raw - nj_credit)
-nj_result = y_swh - nj_final_tax
-
-# --- RESULTS DASHBOARD ---
+# --- VISUALS ---
 with col_res:
-    st.subheader("Final Audit Summary")
+    st.header("Audit Summary")
     
-    # Visual 1: Bar Chart
-    fig_bar = go.Figure(data=[
-        go.Bar(name='Federal', x=['Fed'], y=[fed_result], marker_color='#002d72'),
-        go.Bar(name='NJ State', x=['NJ'], y=[nj_result], marker_color='#28a745')
+    # 1. NJ-COJ Resident Credit Visualization
+    st.subheader("🛡️ Double Taxation Shield (NJ-COJ)")
+    fig_nj = go.Figure(data=[
+        go.Bar(name='NJ Tax Owed (Pre-Credit)', x=['State Tax'], y=[nj_tax_pre_credit], marker_color='#E74C3C'),
+        go.Bar(name='Credit for NY Tax Paid', x=['State Tax'], y=[nj_credit], marker_color='#2ECC71')
     ])
-    fig_bar.update_layout(title="Refund vs. Owed", height=300)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    fig_nj.update_layout(barmode='stack', height=300, title="How NJ cancels out your NY Tax")
+    st.plotly_chart(fig_nj, use_container_width=True)
 
-    st.metric("Federal Refund/Owed", f"${fed_result:,.2f}", delta_color="normal")
-    st.metric("NJ State Refund/Owed", f"${nj_result:,.2f}")
+    # 2. Results Metrics
+    r1, r2 = st.columns(2)
+    r1.metric("Federal Refund", f"${fed_result:,.2f}", delta="Capped at $40k SALT" if salt_cap > 10000 else "SALT Phased Out")
+    r2.metric("NJ State Refund", f"${nj_result:,.2f}", delta=f"Credit: ${nj_credit:,.0f}")
 
-    # Section 4: Refund Strategies
+    # 3. Planning Impact Chart
     st.divider()
-    st.subheader("🚀 Potential Pre-Tax Wins")
-    st.write("If you had maxed these out, your Fed Owed would decrease:")
+    st.subheader("💰 Savings Impact")
+    current_liab_no_plan = calc_tax(agi + total_pretax_shift - fed_deduct, f_conf["brackets"])
+    tax_savings = current_liab_no_plan - fed_liab
     
-    strat_col1, strat_col2 = st.columns(2)
-    with strat_col1:
-        # HSA Simulation
-        hsa_savings = LAW["Fed"]["hsa_limit"] * 0.3165 # 24% tax + 7.65% FICA
-        st.info(f"**Max HSA:**\n+${hsa_savings:,.2f} Refund")
-    with strat_col2:
-        # 401k Simulation
-        k_savings = 5000 * 0.24 # $5k more in 401k
-        st.info(f"**+$5k 401(k):**\n+${k_savings:,.2f} Refund")
+    st.success(f"Your pre-tax contributions are saving you **${tax_savings:,.2f}** in federal taxes this year.")
+    
+    fig_plan = go.Figure(go.Indicator(
+        mode = "number+delta",
+        value = fed_result,
+        delta = {'reference': fed_result - tax_savings, 'relative': False, 'position': "top"},
+        title = {"text": "Federal Refund Increase from Pre-Tax Planning"},
+        domain = {'x': [0, 1], 'y': [0, 1]}
+    ))
+    st.plotly_chart(fig_plan, use_container_width=True)
 
-    # The 5k Logic Explainer
-    if fed_result < -5000:
-        with st.expander("🔍 Why do I owe > $5,000?"):
-            st.error(f"""
-            - **Investment Drag:** You have ${int_inc + max(0, net_inv):,.0f} in untaxed income.
-            - **Bracket Creep:** Your combined income pushed you into the 24% bracket.
-            - **SALT Cap:** You lost the ability to deduct ${max(0, salt_total - 10000):,.0f} of your state taxes.
-            """)
-
-# --- WITHHOLDING ADJUSTER ---
-st.divider()
-st.subheader("📈 How to Fix This for Next Year")
-pay_left = st.number_input("How many paychecks left this year?", 1, 26, 22)
-if fed_result < 0:
-    extra_withholding = abs(fed_result) / pay_left
-    st.success(f"To break even, add **${extra_withholding:,.2f}** to Line 4(c) on your Federal W-4.")
+    with st.expander("🔍 View Technical Breakdown"):
+        st.write(f"Federal Taxable Income: **${fed_taxable:,.0f}**")
+        st.write(f"Effective SALT Cap: **${salt_cap:,.0f}**")
+        st.write(f"NJ Tax Rate Ratio: **{income_ratio*100:.1f}%** of income taxed by NY.")
