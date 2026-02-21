@@ -2,7 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 
-# --- 2026 MASTER DATA ---
+# --- 2026 MASTER DATA (OBBBA Compliant) ---
 LAW_2026 = {
     "Fed": {
         "MFJ": {
@@ -32,26 +32,26 @@ st.title("📊 2026 Master Tax Auditor & Paycheck Fixer")
 # --- SIDEBAR: PRE-TAX PLANNING ---
 with st.sidebar:
     st.header("🚀 2026 Planning Tools")
-    st.info("Use these to see how 'Pre-Tax' changes affect your refund.")
-    add_contrib = st.slider("Increase 401(k)/HSA by:", 0, 30000, 5000)
+    st.info("Simulate how 'Pre-Tax' increases affect your final refund.")
+    add_contrib = st.slider("Potential Extra 401(k) Contribution", 0, 30000, 0)
     pay_periods = st.number_input("Paychecks left in 2026", 1, 26, 20)
 
-# --- 1. INCOME INPUTS (With W-2 Box Notations) ---
+# --- 1. INCOME INPUTS ---
 col_u, col_s = st.columns(2)
 
 with col_u:
     st.header("👤 Your Income (NJ)")
-    y_wages = st.number_input("Federal Wages (W-2 Box 1)", value=145000.0)
-    y_fwh = st.number_input("Federal Withheld (W-2 Box 2)", value=19000.0)
-    y_swh = st.number_input("NJ State Withheld (W-2 Box 17)", value=7000.0)
-    y_k = st.number_input("401(k) Contribution (W-2 Box 12, Code D)", value=10000.0)
+    y_wages = st.number_input("Federal Wages (W-2 Box 1)", value=145000.0, key="y_w1", help="This is your total taxable income after 401k/Health premiums are removed.")
+    y_fwh = st.number_input("Federal Withheld (W-2 Box 2)", value=19000.0, key="y_f2")
+    y_swh = st.number_input("NJ State Withheld (W-2 Box 17)", value=7000.0, key="y_s17")
+    y_k = st.number_input("401(k) Contribution (W-2 Box 12, Code D)", value=10000.0, key="y_b12", help="Code D shows your traditional 401k contributions. This reduces your taxable income.")
 
 with col_s:
     st.header("👤 Spouse Income (NY)")
-    s_wages = st.number_input("Federal Wages (W-2 Box 1)", value=135000.0)
-    s_fwh = st.number_input("Federal Withheld (W-2 Box 2)", value=17000.0)
-    s_ny_tax = st.number_input("Actual NY Tax Paid (W-2 Box 17 / NY IT-203)", value=9500.0)
-    s_k = st.number_input("401(k) Contribution (W-2 Box 12, Code D)", value=10000.0)
+    s_wages = st.number_input("Federal Wages (W-2 Box 1)", value=135000.0, key="s_w1")
+    s_fwh = st.number_input("Federal Withheld (W-2 Box 2)", value=17000.0, key="s_f2")
+    s_ny_tax = st.number_input("Actual NY Tax Paid (W-2 Box 17 / NY IT-203)", value=9500.0, key="s_s17", help="Use the final liability from your NY return, not just the withholding.")
+    s_k = st.number_input("401(k) Contribution (W-2 Box 12, Code D)", value=10000.0, key="s_b12")
 
 st.divider()
 c1, c2 = st.columns(2)
@@ -60,7 +60,7 @@ mrtg_int = c1.number_input("Mortgage Interest", value=22000.0)
 kids = c2.number_input("Qualifying Children (<17)", value=2)
 
 # --- 2. THE CALCULATION ENGINE ---
-agi = (y_wages + s_wages) - add_contrib # Current AGI plus any new planning shift
+agi = (y_wages + s_wages) - add_contrib 
 f_conf = LAW_2026["Fed"]["MFJ"]
 
 # SALT Calculation
@@ -78,12 +78,13 @@ fed_diff = (y_fwh + s_fwh) - fed_liab
 # NJ Resident Credit (Schedule NJ-COJ)
 nj_taxable = max(0, agi - min(prop_tax, 15000) - (kids * 1000) - 2000)
 nj_tax_pre_credit = calc_tax(nj_taxable, LAW_2026["NJ"]["brackets"])
+# Ratio of Spouse NY income to total AGI
 nj_credit_ratio = (s_wages - s_k) / max(1, agi)
 nj_credit = min(s_ny_tax, nj_tax_pre_credit * nj_credit_ratio)
 nj_liab = nj_tax_pre_credit - nj_credit
 nj_diff = y_swh - nj_liab
 
-# --- 3. DYNAMIC GRAPHS ---
+# --- 3. THE GRAPHS (RESTORED) ---
 st.header("📊 Interactive Visuals")
 g1, g2, g3 = st.columns(3)
 
@@ -117,8 +118,9 @@ with g3:
 # --- 4. THE PAYCHECK FIXER ---
 st.divider()
 st.header("🛠️ Paycheck Correction (W-4)")
-if fed_diff < -1000 or nj_diff < -500:
-    st.error(f"You are underpaying by **${abs(fed_diff + nj_diff):,.2f}**.")
+total_due = fed_diff + nj_diff
+if total_due < -500:
+    st.error(f"Underpayment: You are on track to owe **${abs(total_due):,.2f}**.")
     f_fix = abs(min(0, fed_diff))/pay_periods
     n_fix = abs(min(0, nj_diff))/pay_periods
     
@@ -126,10 +128,10 @@ if fed_diff < -1000 or nj_diff < -500:
     fx1.metric("Federal W-4 Line 4(c)", f"${f_fix:,.2f} / check")
     fx2.metric("NJ-W4 Line 5", f"${n_fix:,.2f} / check")
 else:
-    st.success(f"Estimated Combined Refund: **${(fed_diff + nj_diff):,.2f}**")
+    st.success(f"Estimated Refund: **${total_due:,.2f}**")
 
-# --- 5. TECHNICAL SUMMARY ---
-with st.expander("🔍 View Filing Details"):
+# --- 5. SUMMARY TABLE ---
+with st.expander("🔍 View Technical Filing Details"):
     st.table(pd.DataFrame({
         "Category": ["Federal AGI", "Fed Taxable", "NJ Taxable", "NY Resident Credit"],
         "Value": [f"${agi:,.2f}", f"${fed_taxable:,.2f}", f"${nj_taxable:,.2f}", f"${nj_credit:,.2f}"]
