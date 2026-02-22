@@ -25,6 +25,14 @@ def calc_tax(income, brackets):
     return tax
 
 st.set_page_config(layout="wide", page_title="2026 Master Auditor")
+
+# --- SIDEBAR: PAYCHECK CALCULATOR ---
+with st.sidebar:
+    st.header("⚙️ Paycheck Adjustment")
+    pay_periods_left = st.number_input("Pay periods remaining in 2026", value=20, min_value=1)
+    st.divider()
+    st.header("📥 Export Center")
+
 st.title("⚖️ 2026 Full Master Tax Auditor")
 
 # --- 1. INCOME INPUTS ---
@@ -68,8 +76,7 @@ ny_liab = calc_tax(ny_taxable, LAW_2026["NY"]["brackets"])
 
 # Federal Calculation
 salt_cap = max(10000, 40400 - (max(0, agi - 505000) * 0.30))
-total_salt_paid = prop_tax + y_s17 + s_ny_wh
-allowed_salt = min(total_salt_paid, salt_cap)
+allowed_salt = min(prop_tax + y_s17 + s_ny_wh, salt_cap)
 fed_med = max(0, med_exp - (agi * 0.075))
 fed_charity = max(0, charity - (agi * 0.005))
 fed_itemized = mrtg_int + allowed_salt + fed_med + fed_charity
@@ -86,56 +93,54 @@ nj_tax_pre = calc_tax(nj_taxable, LAW_2026["NJ"]["brackets"])
 nj_credit = min(ny_liab, nj_tax_pre * ((s_w1 - s_b12) / max(1, agi)))
 nj_liab_final = nj_tax_pre - nj_credit
 
+# Final Settlement Totals
+fed_paid, nj_paid, ny_paid = (y_f2 + s_f2), y_s17, s_ny_wh
+fed_bal, nj_bal, ny_bal = fed_paid - fed_liab, nj_paid - nj_liab_final, ny_paid - ny_liab
+
 # --- 3. UI RESULTS ---
 st.divider()
 st.header("🏁 Final Settlement Summary")
 m1, m2, m3 = st.columns(3)
-fed_bal = (y_f2 + s_f2) - fed_liab
-nj_bal = y_s17 - nj_liab_final
-ny_bal = s_ny_wh - ny_liab
+m1.metric("Federal Refund/Owe", f"${fed_bal:,.2f}", delta="Refund" if fed_bal >= 0 else "Owe")
+m2.metric("NJ Refund/Owe", f"${nj_bal:,.2f}", delta="Refund" if nj_bal >= 0 else "Owe")
+m3.metric("NY Refund/Owe", f"${ny_bal:,.2f}", delta="Refund" if ny_bal >= 0 else "Owe")
 
-m1.metric("Federal Refund/Owe", f"${fed_bal:,.2f}")
-m2.metric("NJ Refund/Owe", f"${nj_bal:,.2f}")
-m3.metric("NY Refund/Owe", f"${ny_bal:,.2f}")
+# --- 4. DATA AUDIT TABLE ---
+st.subheader("📊 Detailed Audit Trail")
+audit_comparison = pd.DataFrame({
+    "Jurisdiction": ["Federal (IRS)", "New Jersey (NJ)", "New York (NY)"],
+    "Taxable Income": [f"${fed_taxable:,.0f}", f"${nj_taxable:,.0f}", f"${ny_taxable:,.0f}"],
+    "Total Liability": [f"${fed_liab:,.2f}", f"${nj_liab_final:,.2f}", f"${ny_liab:,.2f}"],
+    "Amount Paid": [f"${fed_paid:,.2f}", f"${nj_paid:,.2f}", f"${ny_paid:,.2f}"],
+    "Final Balance": [f"${fed_bal:,.2f}", f"${nj_bal:,.2f}", f"${ny_bal:,.2f}"]
+})
+st.table(audit_comparison)
 
-# --- 4. VISUALIZATIONS ---
+# Paycheck Adjustment Info
+if fed_bal < 0 or nj_bal < 0:
+    st.warning("⚠️ **Underpayment Detected**")
+    c1, c2 = st.columns(2)
+    if fed_bal < 0:
+        c1.write(f"Increase Federal withholding by **${abs(fed_bal)/pay_periods_left:,.2f}** per period.")
+    if nj_bal < 0:
+        c2.write(f"Increase NJ withholding by **${abs(nj_bal)/pay_periods_left:,.2f}** per period.")
+
+# --- 5. VISUALIZATIONS ---
 st.divider()
 g1, g2 = st.columns(2)
-
 with g1:
-    # Pie Chart
-    labels = ['Take Home', 'Fed Tax', 'NJ/NY Tax', '401k Savings']
+    labels = ['Take Home', 'Fed Tax', 'State Taxes', 'Savings']
     values = [agi - fed_liab - nj_liab_final - ny_liab, fed_liab, nj_liab_final + ny_liab, y_b12 + s_b12]
     fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4)])
     fig_pie.update_layout(title_text="Income Allocation")
     st.plotly_chart(fig_pie, use_container_width=True)
 
 with g2:
-    # SALT Gauge
     fig_gauge = go.Figure(go.Indicator(
-        mode = "gauge+number",
-        value = allowed_salt,
-        domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': f"SALT Cap: ${salt_cap:,.0f}"},
-        gauge = {'axis': {'range': [None, 50000]},
-                 'bar': {'color': "#3498DB"},
-                 'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': salt_cap}}))
+        mode = "gauge+number", value = allowed_salt,
+        title = {'text': f"SALT Cap Use (${salt_cap:,.0f})"},
+        gauge = {'axis': {'range': [None, 50000]}, 'threshold': {'line': {'color': "red", 'width': 4}, 'value': salt_cap}}))
     st.plotly_chart(fig_gauge, use_container_width=True)
-
-# Deduction Bar Chart
-st.subheader("Itemized Breakdown vs Standard Deduction")
-ded_df = pd.DataFrame({
-    "Category": ["Mortgage", "SALT", "Medical (Excess)", "Charity (Excess)"],
-    "Amount": [mrtg_int, allowed_salt, fed_med, fed_charity]
-})
-st.bar_chart(ded_df, x="Category", y="Amount")
-st.write(f"Your Itemized Total: **${fed_itemized:,.2f}** | Standard Deduction: **${std_ded_total:,.2f}**")
-
-# --- 5. DATA AUDIT TABLE ---
-st.table(pd.DataFrame({
-    "Metric": ["Total AGI", "Fed Taxable", "NJ Taxable", "NY Taxable", "Fed Liab", "NJ Liab", "NY Liab"],
-    "Value": [f"${agi:,.0f}", f"${fed_taxable:,.0f}", f"${nj_taxable:,.0f}", f"${ny_taxable:,.0f}", f"${fed_liab:,.0f}", f"${nj_liab_final:,.0f}", f"${ny_liab:,.0f}"]
-}))
 
 # --- 6. PDF EXPORT ---
 def generate_pdf():
@@ -143,14 +148,16 @@ def generate_pdf():
     pdf.add_page()
     pdf.set_font("helvetica", 'B', 16)
     pdf.cell(w=190, h=10, text="2026 Master Tax Audit", align='C', new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("helvetica", size=12)
+    pdf.set_font("helvetica", size=10)
     pdf.ln(10)
-    pdf.cell(w=190, h=10, text=f"Total AGI: ${agi:,.2f}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(w=190, h=10, text=f"Federal Taxable: ${fed_taxable:,.2f}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(w=190, h=10, text=f"Total Fed Liability: ${fed_liab:,.2f}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(w=190, h=10, text=f"Total NJ Liability: ${nj_liab_final:,.2f}", new_x="LMARGIN", new_y="NEXT")
+    
+    entities = [["Federal", fed_liab, fed_paid, fed_bal], ["NJ State", nj_liab_final, nj_paid, nj_bal], ["NY State", ny_liab, ny_paid, ny_bal]]
+    pdf.set_font("helvetica", 'B', 10)
+    pdf.cell(45, 10, "Entity", 1); pdf.cell(45, 10, "Liability", 1); pdf.cell(45, 10, "Paid", 1); pdf.cell(45, 10, "Balance", 1, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("helvetica", size=10)
+    for e in entities:
+        pdf.cell(45, 10, e[0], 1); pdf.cell(45, 10, f"${e[1]:,.2f}", 1); pdf.cell(45, 10, f"${e[2]:,.2f}", 1); pdf.cell(45, 10, f"${e[3]:,.2f}", 1, new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
 if st.sidebar.button("Generate PDF Report"):
-    pdf_bytes = generate_pdf()
-    st.sidebar.download_button("Download Audit PDF", data=pdf_bytes, file_name="Audit.pdf", mime="application/pdf")
+    st.sidebar.download_button("Download Now", data=generate_pdf(), file_name="Audit_2026.pdf")
